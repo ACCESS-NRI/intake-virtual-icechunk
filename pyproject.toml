@@ -5,7 +5,7 @@ authors = [
 ]
 description = "An intake plugin for building and reading Icechunk stores via VirtualiZarr and intake-esm"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
@@ -14,7 +14,7 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    "intake >= 0.7.0",
+    "intake>=2.0.0",
     "icechunk",
     "virtualizarr",
     "intake-esm",
@@ -33,7 +33,7 @@ Homepage = "https://github.com/ACCESS-NRI/intake-virtual-icechunk"
 "Bug Tracker" = "https://github.com/ACCESS-NRI/intake-virtual-icechunk/issues"
 
 [project.entry-points."intake.drivers"]
-virtual_icechunk = "intake_virtual_icechunk.core:IcechunkSource"
+virtual_icechunk = "intake_virtual_icechunk.core:IcechunkCatalog"
 
 [build-system]
 build-backend = "setuptools.build_meta"
@@ -55,10 +55,10 @@ omit = [
     "*/tests/*",
 ]
 
-[tool.pixi.project]
+[tool.pixi.workspace]
 name = "intake-virtual-icechunk"
 channels = ["conda-forge"]
-platforms = ["osx-arm64", "linux-64"]
+platforms = ["osx-arm64", "linux-64", "win-64"]
 
 [tool.pixi.dependencies]
 icechunk = "*"
@@ -66,8 +66,13 @@ virtualizarr = "*"
 intake-esm = "*"
 zarr = "*"
 
-[tool.pixi.feature.py310.dependencies]
-python = "3.10.*"
+[tool.pixi.feature.dev.pypi-dependencies]
+intake_virtual_icechunk = { path = ".", editable = true }
+pdbpp = ">=0.11.7,<0.12"
+
+[tool.pixi.feature.test.pypi-dependencies]
+intake_virtual_icechunk = { path = ".", editable = false }
+
 
 [tool.pixi.feature.py311.dependencies]
 python = "3.11.*"
@@ -77,6 +82,9 @@ python = "3.12.*"
 
 [tool.pixi.feature.py313.dependencies]
 python = "3.13.*"
+
+[tool.pixi.feature.py314.dependencies]
+python = "3.14.*"
 
 [tool.pixi.feature.test.dependencies]
 pytest = "*"
@@ -88,13 +96,14 @@ test = "pytest tests/"
 lint = "ruff check src/"
 
 [tool.pixi.environments]
-test-py310 = ["test", "py310"]
+default = { features = ["dev","py313"], solve-group = "default" }
 test-py311 = ["test", "py311"]
 test-py312 = ["test", "py312"]
 test-py313 = ["test", "py313"]
+test-py314 = ["test", "py314"]
 
 [tool.ruff]
-target-version = "py310"
+target-version = "py311"
 exclude = [
     ".bzr",
     ".direnv",
