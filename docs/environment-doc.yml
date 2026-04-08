@@ -1,0 +1,22 @@
+name: intake-virtual-icechunk-doc
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python==3.11
+  - numpydoc
+  - sphinx
+  - sphinx-autobuild
+  - icechunk
+  - virtualizarr
+  - intake-esm
+  - zarr
+  - pip
+  - pip:
+    - ruff
+    - sphinx-book-theme
+    - sphinxcontrib-napoleon
+    - sphinx-copybutton
+    - myst-nb
+    - pre-commit
+    - -e ..
