@@ -16,7 +16,6 @@ classifiers = [
 dependencies = [
     "intake>=2.0.0",
     "icechunk",
-    "virtualizarr",
     "intake-esm",
     "zarr",
 ]
@@ -26,6 +25,10 @@ dynamic = ["version"]
 test = [
     "pytest",
     "pytest-cov",
+]
+
+virtualizarr = [
+    "virtualizarr",
 ]
 
 [project.urls]
@@ -61,10 +64,17 @@ channels = ["conda-forge"]
 platforms = ["osx-arm64", "linux-64", "win-64"]
 
 [tool.pixi.dependencies]
-icechunk = "*"
-virtualizarr = "*"
 intake-esm = "*"
 zarr = "*"
+
+[tool.pixi.feature.icechunk-1.pypi-dependencies]
+icechunk = "*"
+
+[tool.pixi.feature.icechunk-2.pypi-dependencies]
+icechunk = ">=2.0.0a7,<3.0.0"
+
+[tool.pixi.feature.virtualizarr.dependencies]
+virtualizarr = "*"
 
 [tool.pixi.feature.dev.pypi-dependencies]
 intake_virtual_icechunk = { path = ".", editable = true }
@@ -96,11 +106,12 @@ test = "pytest tests/"
 lint = "ruff check src/"
 
 [tool.pixi.environments]
-default = { features = ["dev","py313"], solve-group = "default" }
-test-py311 = ["test", "py311"]
-test-py312 = ["test", "py312"]
-test-py313 = ["test", "py313"]
-test-py314 = ["test", "py314"]
+default = { features = ["dev","py313","icechunk-1", "virtualizarr"], solve-group = "default" }
+icechunk-2 = { features = ["dev","py313","icechunk-2", "virtualizarr"], solve-group = "icechunk-2" }
+test-py311 = ["test", "py311", "virtualizarr"]
+test-py312 = ["test", "py312", "virtualizarr"]
+test-py313 = ["test", "py313", "virtualizarr"]
+test-py314 = ["test", "py314", "virtualizarr"]
 
 [tool.ruff]
 target-version = "py311"
