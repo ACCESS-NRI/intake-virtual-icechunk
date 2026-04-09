@@ -5,8 +5,7 @@ on: [push, pull_request]
 jobs:
   pypi:
     name: build and deploy to PyPI
-    #if: github.repository == 'ACCESS-NRI/intake-virtual-icechunk' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags')
-    if: github.repository == 'charles-turner-1/intake-virtual-icechunk' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags')
+    if: github.repository == 'ACCESS-NRI/intake-virtual-icechunk' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags')
     runs-on: "ubuntu-latest"
     permissions:
       id-token: write
@@ -32,32 +31,32 @@ jobs:
       - name: Publish package to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
 
-  # conda:
-  #   name: build and deploy to conda
-  #   needs: pypi
-  #   if: always() && needs.pypi.result == 'success'
-  #   runs-on: "ubuntu-latest"
+  conda:
+    name: build and deploy to conda
+    needs: pypi
+    if: always() && needs.pypi.result == 'success'
+    runs-on: "ubuntu-latest"
 
-  #   steps:
-  #     - name: Checkout source
-  #       uses: actions/checkout@v6
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
 
-  #     - name: Setup conda environment
-  #       uses: conda-incubator/setup-miniconda@v3
-  #       with:
-  #         miniconda-version: "latest"
-  #         python-version: 3.11
-  #         environment-file: .conda/environment.yml
-  #         auto-update-conda: false
-  #         auto-activate-base: false
-  #         show-channel-urls: true
+      - name: Setup conda environment
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniconda-version: "latest"
+          python-version: 3.11
+          environment-file: .conda/environment.yml
+          auto-update-conda: false
+          auto-activate-base: false
+          show-channel-urls: true
 
-  #     - name: Build and upload the conda package
-  #       uses: uibcdf/action-build-and-upload-conda-packages@v1.5.0
-  #       with:
-  #         meta_yaml_dir: .conda
-  #         python-version: 3.11
-  #         user: accessnri
-  #         label: main
-  #         token: ${{ secrets.anaconda_token }}
+      - name: Build and upload the conda package
+        uses: uibcdf/action-build-and-upload-conda-packages@v1.5.0
+        with:
+          meta_yaml_dir: .conda
+          python-version: 3.11
+          user: accessnri
+          label: main
+          token: ${{ secrets.anaconda_token }}
 
