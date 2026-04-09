@@ -45,7 +45,7 @@ jobs:
         uses: conda-incubator/setup-miniconda@v3
         with:
           miniconda-version: "latest"
-          python-version: 3.11
+          python-version: 3.12
           environment-file: .conda/environment.yml
           auto-update-conda: false
           auto-activate-base: false
@@ -55,7 +55,7 @@ jobs:
         uses: uibcdf/action-build-and-upload-conda-packages@v1.5.0
         with:
           meta_yaml_dir: .conda
-          python-version: 3.11
+          python-version: 3.12
           user: accessnri
           label: main
           token: ${{ secrets.anaconda_token }}

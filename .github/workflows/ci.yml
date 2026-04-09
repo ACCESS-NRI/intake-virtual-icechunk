@@ -22,7 +22,7 @@ jobs:
       max-parallel: 8 # ACCESS-NRI has a limit of 20. This leaves room for other jobs.
       matrix:
         os: ["ubuntu-latest", "macos-latest", "windows-latest"]
-        pixi-env: ["test-py311", "test-py312", "test-py313", "test-py314"]
+        pixi-env: ["test-py312", "test-py313", "test-py314"]
 
     steps:
       - name: Checkout source
