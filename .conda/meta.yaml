@@ -20,7 +20,7 @@ requirements:
     - pip
     - setuptools_scm
   run:
-    - python >=3.11
+    - python >=3.12
     {% for dep in deps %}
     - {{ dep }}
     {% endfor %}

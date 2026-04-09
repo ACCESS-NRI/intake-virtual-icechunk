@@ -5,7 +5,7 @@ authors = [
 ]
 description = "An intake plugin for building and reading Icechunk stores via VirtualiZarr and intake-esm"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = { text = "Apache-2.0" }
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
@@ -71,7 +71,7 @@ zarr = "*"
 icechunk = "*"
 
 [tool.pixi.feature.icechunk-2.pypi-dependencies]
-icechunk = ">=2.0.0a7,<3.0.0"
+icechunk = ">=2.0.0,<3.0.0"
 
 [tool.pixi.feature.virtualizarr.dependencies]
 virtualizarr = "*"
@@ -91,9 +91,6 @@ setup-ipykernel = {cmd= "python -m ipykernel install --user --name=intake-virtua
 [tool.pixi.feature.test.pypi-dependencies]
 intake_virtual_icechunk = { path = ".", editable = false }
 
-
-[tool.pixi.feature.py311.dependencies]
-python = "3.11.*"
 
 [tool.pixi.feature.py312.dependencies]
 python = "3.12.*"
@@ -116,13 +113,12 @@ lint = { cmd = "ruff check src/" , description = "Run linting" }
 [tool.pixi.environments]
 default = { features = ["dev","py313","icechunk-1", "virtualizarr"], solve-group = "default" }
 icechunk-2 = { features = ["dev","py313","icechunk-2", "virtualizarr"], solve-group = "icechunk-2" }
-test-py311 = ["test", "py311", "virtualizarr"]
 test-py312 = ["test", "py312", "virtualizarr"]
 test-py313 = ["test", "py313", "virtualizarr"]
 test-py314 = ["test", "py314", "virtualizarr"]
 
 [tool.ruff]
-target-version = "py311"
+target-version = "py312"
 exclude = [
     ".bzr",
     ".direnv",
