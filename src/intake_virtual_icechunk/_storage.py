@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from urllib.parse import urlparse
+import os
 
 import icechunk
 from obspec_utils.registry import ObjectStoreRegistry
@@ -86,16 +87,12 @@ def _resolve_store(paths: str | list[str], store_options: dict) -> ObjectStoreRe
     """
     paths = [paths] if isinstance(paths, str) else paths
 
-    path = paths[0]  # Just use the first for the time being (janky, idgaf)
-
-    parsed = urlparse(path)
+    parsed = urlparse(paths[0])
     scheme = parsed.scheme
 
     if scheme in ("", "file") or (len(scheme) == 1 and scheme.isalpha()):
-        store = LocalStore(
-            prefix=path,
-        )
-        return ObjectStoreRegistry({"path": store})
+        store = LocalStore()
+        return ObjectStoreRegistry({f"file://{path}" : store for path in paths})
 
     bucket = parsed.netloc
 

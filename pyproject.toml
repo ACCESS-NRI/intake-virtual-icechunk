@@ -84,6 +84,7 @@ pdbpp = ">=0.11.7,<0.12"
 ipykernel = ">=7.2.0,<8"
 jupyterlab = ">=4.5.6,<5"
 pytest = ">=9.0.3,<10"
+h5py = "*"
 
 [tool.pixi.feature.dev.tasks]
 setup-ipykernel = {cmd= "python -m ipykernel install --user --name=intake-virtual-icechunk-dev", description = "Set up the ipykernel for the dev environment"}
