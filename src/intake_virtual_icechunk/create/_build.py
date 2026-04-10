@@ -179,7 +179,9 @@ class IcechunkStoreBuilder:
 
         path_column = self.esm_ds.esmcat.assets.column_name
         paths = self.esm_ds.esmcat.df[path_column].tolist()
-        self.obsstore_registry = _resolve_store(paths, self.store_options)
+        self.obsstore_registry, self.source_url_prefix = _resolve_store(
+            paths, self.store_options
+        )
 
         return self.obsstore_registry
 
@@ -220,18 +222,25 @@ class IcechunkStoreBuilder:
         esmcat = self.esm_ds.esmcat
         groupby_attrs, assets_col = self._extract_datastore_structure()
 
-        storage = _resolve_storage(self.store_path, self.storage_options)
-        repo = icechunk.Repository.create(storage)
+        # Resolve registry first so self.source_url_prefix is available for the
+        # VirtualChunkContainer config below.
+        self._create_registry()
 
-        # JAnky - needed for virtualisation, needs to be generalised.
-        # also doesnjt work...
+        storage = _resolve_storage(self.store_path, self.storage_options)
+
         config = icechunk.RepositoryConfig.default()
         config.set_virtual_chunk_container(
             icechunk.VirtualChunkContainer(
-                url_prefix = "file:///",
-                store = icechunk.local_filesystem_store("/"),
+                url_prefix=self.source_url_prefix,
+                store=icechunk.local_filesystem_store(
+                    self.source_url_prefix.removeprefix("file://")
+                ),
             )
         )
+        credentials = icechunk.containers_credentials(
+            {self.source_url_prefix: None}
+        )
+        repo = icechunk.Repository.create(storage, config, credentials)
 
         # ------------------------------------------------------------------
         # 3. Build each group inside a single transaction
