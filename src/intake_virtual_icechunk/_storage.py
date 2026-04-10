@@ -4,6 +4,20 @@
 from urllib.parse import urlparse
 
 import icechunk
+from obspec_utils.registry import ObjectStoreRegistry
+from obstore.store import LocalStore
+
+
+class IceChunkStoreError(Exception):
+    """Custom exception for errors related to Icechunk store resolution."""
+
+    pass
+
+
+class ObjectStoreError(Exception):
+    """Custom exception for errors related to object store resolution."""
+
+    pass
 
 
 def _resolve_storage(store: str, storage_options: dict) -> icechunk.Storage:
@@ -58,7 +72,65 @@ def _resolve_storage(store: str, storage_options: dict) -> icechunk.Storage:
             container=container, prefix=prefix, **storage_options
         )
 
-    raise ValueError(
+    raise IceChunkStoreError(
+        f"Unsupported store scheme: {scheme!r}. "
+        "Expected a local path or one of s3://, gs://, gcs://, az://."
+    )
+
+
+def _resolve_store(paths: str | list[str], store_options: dict) -> ObjectStoreRegistry:
+    """
+    Virtualizarr requires us to create an obstore registry for the source data.
+    This function resolves the first path in the catalog's assets to an appropriate
+    obstore Store, which we can then wrap in a registry and pass to Virtualizarr.
+    """
+    paths = [paths] if isinstance(paths, str) else paths
+
+    path = paths[0]  # Just use the first for the time being (janky, idgaf)
+
+    parsed = urlparse(path)
+    scheme = parsed.scheme
+
+    if scheme in ("", "file") or (len(scheme) == 1 and scheme.isalpha()):
+        store = LocalStore(
+            prefix=path,
+        )
+        return ObjectStoreRegistry({"path": store})
+
+    bucket = parsed.netloc
+
+    if scheme == "s3":
+        store = S3Store.from_url(  # type: ignore[assignment]
+            f"{bucket}",
+            endpoint=store_options.get("endpoint", None),
+            access_key_id=store_options.get("access_key_id", None),
+            secret_access_key=store_options.get("secret_access_key", None),
+        )
+    elif scheme in ("gs", "gcs"):
+        raise NotImplementedError(
+            "GCS support is disabled until I figure out the correct initialisation params"
+        )
+        store = GCSStore.from_url(
+            f"{bucket}",
+            endpoint=store_options.get("endpoint", None),
+            access_key_id=store_options.get("access_key_id", None),
+            secret_access_key=store_options.get("secret_access_key", None),
+        )
+    elif scheme in ("az", "abfs"):
+        raise NotImplementedError(
+            "Azure support is disabled until I figure out the correct initialisation params"
+        )
+        return AzureStore.from_url(
+            f"{bucket}",
+            account=store_options.get("account", None),
+            endpoint=store_options.get("endpoint", None),
+            access_key_id=store_options.get("access_key_id", None),
+            secret_access_key=store_options.get("secret_access_key", None),
+        )
+
+    return ObjectStoreRegistry({f"{bucket}": store})
+
+    raise ObjectStoreError(
         f"Unsupported store scheme: {scheme!r}. "
         "Expected a local path or one of s3://, gs://, gcs://, az://."
     )

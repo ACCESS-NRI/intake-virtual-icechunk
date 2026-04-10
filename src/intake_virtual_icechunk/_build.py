@@ -1,14 +1,49 @@
 # Copyright 2026 ACCESS-NRI and contributors. See the top-level COPYRIGHT file for details.
 # SPDX-License-Identifier: Apache-2.0
 import os
+from typing import TYPE_CHECKING
 
 import icechunk
 import intake
-import xarray as xr
 import zarr
+from intake_esm.core import esm_datastore
 
-from ._storage import _resolve_storage
+from ._storage import _resolve_storage, _resolve_store
 from .cat import VirtualIcechunkCatalogModel
+
+if TYPE_CHECKING:
+    from obspec_utils.registry import ObjectStoreRegistry
+    from virtualizarr.parsers import (
+        DMRPPParser,
+        FITSParser,
+        HDFParser,
+        KerchunkJSONParser,
+        KerchunkParquetParser,
+        NetCDF3Parser,
+        ZarrParser,
+    )
+
+    VirtualizarrParser = (
+        type[DMRPPParser]
+        | type[FITSParser]
+        | type[HDFParser]
+        | type[KerchunkJSONParser]
+        | type[KerchunkParquetParser]
+        | type[NetCDF3Parser]
+        | type[ZarrParser]
+    )
+
+
+class IcechunkBuildError(Exception):
+    """Custom exception for errors during the Icechunk store build process."""
+
+    pass
+
+
+class ParserInferenceError(IcechunkBuildError):
+    """Raised when the parser cannot be inferred from the intake-esm catalog."""
+
+    pass
 
 
 class IcechunkStoreBuilder:
@@ -32,6 +67,11 @@ class IcechunkStoreBuilder:
     Icechunk session, store, and branch management is handled internally so
     callers need only supply paths.
 
+    Warning: store_options are for the source data store, not the target Icechunk store.
+    The target Icechunk store is always created with default options.
+    If you need to customize the target store (e.g. for a non-file-based storage backend),
+    please open an issue or submit a PR.
+
     Parameters
     ----------
     catalog_path : str
@@ -40,18 +80,120 @@ class IcechunkStoreBuilder:
         Path or URI at which to create (or open) the Icechunk store.
         Supported schemes: local path, ``s3://``, ``gs://`` / ``gcs://``,
         ``az://``.
+    parser : VirtualizarrParser, optional
+        Optionally specify the VirtualiZarr parser to use when opening source. I
+        not provided, the builder will attempt to infer the parser from the intake-esm
+        catalog's ``assets.format`` field. See https://intake-esm.readthedocs.io/en/stable/reference/esm-catalog-spec
     storage_options : dict, optional
-        Keyword arguments forwarded to the Icechunk storage backend.
+        Keyword arguments forwarded to the Icechunk storage backend. See _resolve_storage() for details.
+    store_options: dict, optional
+
     """
 
-    import virtualizarr  # noqa: F401 – ensure VirtualiZarr is importable
+    from virtualizarr import open_virtual_mfdataset
 
     def __init__(
-        self, catalog_path: str, store_path: str, storage_options: dict | None = None
+        self,
+        catalog_path: str,
+        store_path: str,
+        parser: VirtualizarrParser | None = None,
+        storage_options: dict | None = None,
+        store_options: dict | None = None,
     ):
         self.catalog_path = catalog_path
         self.store_path = store_path
+
         self.storage_options = storage_options or {}
+        self.store_options = store_options or {}
+        self.parser = parser or self._infer_parser()
+
+    @property
+    def esm_ds(self) -> esm_datastore:
+        """
+        Use a property to lazily load the intake-esm datastore only when needed,
+        and cache it on the builder instance. mostly so we can put all our optional
+        arguments in `__init__` together and not have to worry about ordering.
+        """
+
+        self._esm_ds: esm_datastore | None
+        if self._esm_ds is None:
+            self._esm_ds = intake.open_esm_datastore(self.catalog_path)
+        return self._esm_ds
+
+    def _infer_parser(self) -> VirtualizarrParser:
+        """
+        We can infer the parser from the esm datastore, since it's specification
+        contains it. We use this to determinte the parser
+        """
+        from virtualizarr import parsers
+
+        try:
+            format = self.esm_ds.esmcat.assets.format.value  # type: ignore[union-attr]
+        except AttributeError:
+            raise ParserInferenceError(
+                "Cannot infer parser from intake-esm catalog: "
+                "the 'format' field in the catalog's 'assets' specification is missing. "
+                "Only asserts with a specified 'format' can be built into an Icechunk store. "
+                "See https://intake-esm.readthedocs.io/en/stable/reference/esm-catalog-spec.html#assets-object"
+            )
+
+        if format is None:
+            raise ParserInferenceError(
+                "Cannot infer parser from intake-esm catalog: "
+                "the 'format' field in the catalog's 'assets' specification is missing."
+                "Only asserts with a specified 'format' can be built into an Icechunk store."
+                "See https://intake-esm.readthedocs.io/en/stable/reference/esm-catalog-spec.html#assets-object"
+            )
+
+        PARSER_MAP: dict[str, VirtualizarrParser] = {
+            "netcdf": parsers.HDFParser,
+            "zarr": parsers.ZarrParser,
+            "zarr2": parsers.ZarrParser,
+            "zarr3": parsers.ZarrParser,
+            "reference": parsers.KerchunkJSONParser,
+            # Don't know the best way to handle things that overlap in the format but have different parsers yet.
+            # "todo_0": parsers.DMRPPParser,
+            # "todo_1": parsers.FITSParser,
+            # "todo_2": parsers.NetCDF3Parser,
+            # "todo_4": parsers.KerchunkParquetParser,
+        }
+
+        try:
+            return PARSER_MAP[format]
+        except KeyError:
+            raise ParserInferenceError(
+                f"Unsupported parser format '{format}' specified in intake-esm catalog. "
+                f"Supported formats are: {list(PARSER_MAP.keys())}."
+            )
+
+    def _create_registry(self) -> ObjectStoreRegistry:
+        """
+        Create an ObjectStoreRegistry to keep our source files in during the virtuualization
+        process. We should be able to infer this from the esm_datastore's assets and our
+        `_resolve_storage()` functionlity, determining a root & registry type.
+
+        We also cache the registry on the builder instance.
+        """
+
+        path_column = self.esm_ds.esmcat.assets.column_name
+        sample_path = self.esm_ds.esmcat.df[path_column].iloc[0]
+        self.obsstore_registry = _resolve_store(sample_path, self.store_options)
+
+        return self.obsstore_registry
+
+    def _extract_datastore_structure(self) -> tuple[list[str], str]:
+        """
+        Grab the groupby_attrs and assets column name from the intake-esm catalog,
+        which we use to build the icechunk store and populate .zattrs.
+        We need these for both the build process and to populate the catalog metadata,
+        """
+        esmcat = self.esm_ds.esmcat
+        agg_control = esmcat.aggregation_control
+        groupby_attrs = (
+            agg_control.groupby_attrs if agg_control else list(esmcat.df.columns)
+        )
+        assets_col = esmcat.assets.column_name
+        return groupby_attrs, assets_col
 
     def build(self) -> None:
         """Build the Icechunk store.
@@ -73,21 +215,9 @@ class IcechunkStoreBuilder:
         intake-esm grouping.
         """
 
-        # ------------------------------------------------------------------
-        # 1. Load the intake-esm catalog
-        # ------------------------------------------------------------------
-        esm_cat = intake.open_esm_datastore(self.catalog_path)
-        esmcat = esm_cat.esmcat
+        esmcat = self.esm_ds.esmcat
+        groupby_attrs, assets_col = self._extract_datastore_structure()
 
-        agg_control = esmcat.aggregation_control
-        groupby_attrs = (
-            agg_control.groupby_attrs if agg_control else list(esmcat.df.columns)
-        )
-        assets_col = esmcat.assets.column_name
-
-        # ------------------------------------------------------------------
-        # 2. Create the Icechunk repository
-        # ------------------------------------------------------------------
         storage = _resolve_storage(self.store_path, self.storage_options)
         repo = icechunk.Repository.create(storage)
 
@@ -97,7 +227,7 @@ class IcechunkStoreBuilder:
         group_key_map = esmcat._construct_group_keys()
 
         with repo.transaction(
-            "main", message="Build Virtual Icechunk catalog"
+            "main", message=f"Build Virtual Icechunk catalog for {self.esm_ds.name}"
         ) as store:
             for public_key, internal_key in group_key_map.items():
                 grouped = esmcat.grouped
@@ -112,29 +242,19 @@ class IcechunkStoreBuilder:
                 # Collect asset file paths for this group
                 file_paths: list[str] = group_df[assets_col].tolist()
 
-                # ----------------------------------------------------------
-                # VirtualiZarr integration
-                # Open each source file as a virtual dataset, combine, and
-                # write to the Icechunk store as a Zarr group.
-                # ----------------------------------------------------------
-                vdatasets = [
-                    xr.open_dataset(fp, engine="virtualizarr") for fp in file_paths
-                ]
-                combined = (
-                    xr.combine_by_coords(vdatasets)
-                    if len(vdatasets) > 1
-                    else vdatasets[0]
+                vds = self.open_virtual_mfdataset(
+                    urls=file_paths,
+                    parser=self.parser,
+                    registry=self.obsstore_registry,
                 )
-                combined.virtualize.to_icechunk(store, group=public_key)
+                vds.vz.to_icechunk(store, group=public_key)
 
                 # Write group metadata into .zattrs so the catalog can search
                 # these groups without opening the arrays.
                 zarr_group = zarr.open_group(store, path=public_key, mode="a")
                 zarr_group.attrs.update(group_attrs)
 
-        # ------------------------------------------------------------------
-        # 4. Write the JSON sidecar
-        # ------------------------------------------------------------------
+        # Write the JSON sidecar
         store_path_obj = os.path.abspath(self.store_path)
         sidecar_name = os.path.splitext(os.path.basename(store_path_obj))[0]
         sidecar_dir = os.path.dirname(store_path_obj)
