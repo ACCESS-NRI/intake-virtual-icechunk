@@ -106,8 +106,8 @@ test = "pytest tests/"
 lint = "ruff check src/"
 
 [tool.pixi.environments]
-default = { features = ["dev","py313","icechunk-1", "virtualizarr"], solve-group = "default" }
-icechunk-2 = { features = ["dev","py313","icechunk-2", "virtualizarr"], solve-group = "icechunk-2" }
+default = { features = ["dev","py313","icechunk-2", "virtualizarr"], solve-group = "default" }
+icechunk-1 = { features = ["dev","py313","icechunk-1", "virtualizarr"], solve-group = "icechunk-1" }
 test-py311 = ["test", "py311", "virtualizarr"]
 test-py312 = ["test", "py312", "virtualizarr"]
 test-py313 = ["test", "py313", "virtualizarr"]
