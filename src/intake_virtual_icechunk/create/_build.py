@@ -240,6 +240,11 @@ class IcechunkStoreBuilder:
         credentials = icechunk.containers_credentials({self.source_url_prefix: None})
         repo = icechunk.Repository.create(storage, config, credentials)
 
+        # Persist the configuration so we don't need to figure it out when we come
+        # back to open the store
+
+        repo.save_config()
+
         # ------------------------------------------------------------------
         # 3. Build each group inside a single transaction
         # ------------------------------------------------------------------
