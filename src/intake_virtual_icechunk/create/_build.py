@@ -248,6 +248,7 @@ class IcechunkStoreBuilder:
         # 3. Build each group inside a single transaction
         # ------------------------------------------------------------------
         group_key_map = esmcat._construct_group_keys()
+        self.failed_list = []
 
         with repo.transaction(
             "main", message=f"Build Virtual Icechunk catalog for {self.esm_ds.name}"
@@ -266,7 +267,6 @@ class IcechunkStoreBuilder:
                     # Collect asset file paths for this group
                     file_paths: list[str] = group_df[assets_col].tolist()
 
-                    self.failed_list = []
                     with open_virtual_mfdataset(
                         urls=file_paths,
                         parser=self.parser,
@@ -285,15 +285,15 @@ class IcechunkStoreBuilder:
                     zarr_group = zarr.open_group(store, path=public_key, mode="a")
                     zarr_group.attrs.update(group_attrs)
 
-                    # And print a little we're done
                     print(f"Virtualised group {public_key} successfully!")
                 except Exception as e:
                     self.failed_list.append((public_key, e))
+                    print(f"Failed to virtualise group {public_key}: {e}")
 
-        # Write the JSON sidecar
-        store_path_obj = os.path.abspath(self.store_path)
+        # Write the JSON sidecar inside the store directory
+        store_path_obj = os.path.abspath(os.path.expanduser(self.store_path))
         sidecar_name = os.path.splitext(os.path.basename(store_path_obj))[0]
-        sidecar_dir = os.path.dirname(store_path_obj)
+        sidecar_dir = store_path_obj
 
         model = VirtualIcechunkCatalogModel(
             store=self.store_path,

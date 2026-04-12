@@ -7635,8 +7635,8 @@ packages:
   timestamp: 1765588398270
 - pypi: ./
   name: intake-virtual-icechunk
-  version: 0.0.5.dev4+gf2135d5cc.d20260410
-  sha256: 56e91d3f2401258aba5368b40fc16fc069581ed8c7c64ffdd7bb429213c7ca9a
+  version: 0.0.5.dev15+g138d710eb.d20260412
+  sha256: cd7d7fa0f0f5ae0b17dbfaf864edecba8306d9695d3da8e9e18a7e7cecc96612
   requires_dist:
   - intake>=2.0.0
   - icechunk

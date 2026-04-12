@@ -46,6 +46,7 @@ class VirtualIcechunkCatalogModel(pydantic.BaseModel):
     last_updated: datetime.datetime | datetime.date | None = None
     storage_options: dict[str, typing.Any] = {}
     virtual_chunk_url_prefixes: list[str] = []
+    virtual_chunk_url_prefixes: list[str] = []
 
     model_config = ConfigDict(validate_assignment=True)
 
