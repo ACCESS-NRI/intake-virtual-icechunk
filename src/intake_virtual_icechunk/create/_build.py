@@ -298,5 +298,6 @@ class IcechunkStoreBuilder:
         model = VirtualIcechunkCatalogModel(
             store=self.store_path,
             storage_options=self.storage_options,
+            virtual_chunk_url_prefixes=[self.source_url_prefix],
         )
         model.save(sidecar_name, directory=sidecar_dir or None)

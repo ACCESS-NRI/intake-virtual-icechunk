@@ -50,8 +50,8 @@ where = ["src"]
 
 [tool.setuptools_scm]
 
-[tool.pytest.ini_options]
-addopts = "--cov=./src --cov-report=xml"
+# [tool.pytest.ini_options]
+# addopts = "--cov=./src --cov-report=xml"
 
 [tool.coverage.run]
 omit = [

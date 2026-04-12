@@ -71,12 +71,19 @@ class IcechunkCatalog(Catalog):
     container = "xarray"
 
     def __init__(
-        self, store, *, storage_options=None, xarray_kwargs=None, **intake_kwargs
+        self,
+        store,
+        *,
+        storage_options=None,
+        xarray_kwargs=None,
+        virtual_chunk_url_prefixes=None,
+        **intake_kwargs,
     ):
         super().__init__(**intake_kwargs)
         self.store = store
         self.storage_options = storage_options or {}
         self.xarray_kwargs = xarray_kwargs or {}
+        self.virtual_chunk_url_prefixes = virtual_chunk_url_prefixes or []
         self._entries = {}
         self.datasets = {}
         self._allowed_keys = None  # None → all top-level groups from the store
@@ -99,7 +106,14 @@ class IcechunkCatalog(Catalog):
             from ._storage import _resolve_storage
 
             storage = _resolve_storage(self.store, self.storage_options)
-            self._open_repo = icechunk.Repository.open(storage)
+            kwargs = {}
+            if self.virtual_chunk_url_prefixes:
+                kwargs["authorize_virtual_chunk_access"] = (
+                    icechunk.containers_credentials(
+                        {prefix: None for prefix in self.virtual_chunk_url_prefixes}
+                    )
+                )
+            self._open_repo = icechunk.Repository.open(storage, **kwargs)
         return self._open_repo
 
     @property
@@ -129,6 +143,7 @@ class IcechunkCatalog(Catalog):
             store=parent.store,
             storage_options=parent.storage_options,
             xarray_kwargs=parent.xarray_kwargs,
+            virtual_chunk_url_prefixes=parent.virtual_chunk_url_prefixes,
         )
         # Share the already-opened backend so we don't re-open the repo.
         cat._open_repo = parent._open_repo
@@ -168,6 +183,7 @@ class IcechunkCatalog(Catalog):
             store=model.store,
             storage_options=model.storage_options,
             xarray_kwargs=xarray_kwargs or {},
+            virtual_chunk_url_prefixes=model.virtual_chunk_url_prefixes,
         )
 
     # ------------------------------------------------------------------
