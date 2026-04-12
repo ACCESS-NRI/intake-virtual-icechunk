@@ -254,20 +254,20 @@ class IcechunkStoreBuilder:
             "main", message=f"Build Virtual Icechunk catalog for {self.esm_ds.name}"
         ) as store:
             for public_key, internal_key in group_key_map.items():
-                grouped = esmcat.grouped
-                group_df = grouped.get_group(internal_key)
-
-                # Collect group-level metadata for .zattrs
-                group_attrs: dict = {}
-                for attr in groupby_attrs:
-                    if attr in group_df.columns:
-                        group_attrs[attr] = group_df[attr].iloc[0]
-
-                # Collect asset file paths for this group
-                file_paths: list[str] = group_df[assets_col].tolist()
-
-                self.failed_list = []
                 try:
+                    grouped = esmcat.grouped
+                    group_df = grouped.get_group(internal_key)
+
+                    # Collect group-level metadata for .zattrs
+                    group_attrs: dict = {}
+                    for attr in groupby_attrs:
+                        if attr in group_df.columns:
+                            group_attrs[attr] = group_df[attr].iloc[0]
+
+                    # Collect asset file paths for this group
+                    file_paths: list[str] = group_df[assets_col].tolist()
+
+                    self.failed_list = []
                     with open_virtual_mfdataset(
                         urls=file_paths,
                         parser=self.parser,
@@ -281,13 +281,13 @@ class IcechunkStoreBuilder:
                     ) as vds:
                         vds.vz.to_icechunk(store, group=public_key)
 
-                    # And print a little we're done
-                    print(f"Virtualised group {public_key} successfully!")
-
                     # Write group metadata into .zattrs so the catalog can search
                     # these groups without opening the arrays.
                     zarr_group = zarr.open_group(store, path=public_key, mode="a")
                     zarr_group.attrs.update(group_attrs)
+
+                    # And print a little we're done
+                    print(f"Virtualised group {public_key} successfully!")
                 except Exception as e:
                     self.failed_list.append((public_key, e))
 
