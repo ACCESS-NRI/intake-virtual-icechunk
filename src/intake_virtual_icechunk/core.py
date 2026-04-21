@@ -3,11 +3,13 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pandas as pd
 import zarr
 from intake.catalog import Catalog
 
-from .source import IcechunkDataSource
+from ._source import IcechunkDataSource
 
 
 def _match_query(attrs: dict, query: dict) -> bool:
@@ -72,7 +74,7 @@ class IcechunkCatalog(Catalog):
 
     def __init__(
         self,
-        store,
+        store: Path | str,
         *,
         storage_options=None,
         xarray_kwargs=None,
@@ -80,7 +82,9 @@ class IcechunkCatalog(Catalog):
         **intake_kwargs,
     ):
         super().__init__(**intake_kwargs)
-        self.store = store
+        # Path may be passed as a string or a Path, we'll store it internally as
+        # a Path and convert to a string where needed. TBC if this is a good idea.
+        self.store: Path = Path(store)
         self.storage_options = storage_options or {}
         self.xarray_kwargs = xarray_kwargs or {}
         self.virtual_chunk_url_prefixes = virtual_chunk_url_prefixes or []
@@ -105,7 +109,7 @@ class IcechunkCatalog(Catalog):
 
             from ._storage import _resolve_storage
 
-            storage = _resolve_storage(self.store, self.storage_options)
+            storage = _resolve_storage(str(self.store), self.storage_options)
             kwargs = {}
             if self.virtual_chunk_url_prefixes:
                 kwargs["authorize_virtual_chunk_access"] = (
@@ -287,6 +291,22 @@ class IcechunkCatalog(Catalog):
         except KeyError:
             return False
         return True
+
+    def __dir__(self) -> list[str]:
+        rv = [
+            "_repo",
+            "_zarr_store",
+            "_root_group",
+            "_from_parent",
+            "from_json",
+            "save",
+            "keys",
+            "search",
+            "df",
+            "to_dataset_dict",
+            "to_dask",
+        ]
+        return sorted(list(self.__dict__.keys()) + rv)
 
     # ------------------------------------------------------------------
     # Search and metadata
