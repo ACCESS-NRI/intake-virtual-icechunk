@@ -109,7 +109,7 @@ class IcechunkStoreBuilder:
     ):
         self.catalog_path = catalog_path
         self.store_path = store_path
-        self._esm_ds = None
+        self._esm_ds: esm_datastore | None = None
 
         self.storage_options = storage_options or {}
         self.store_options = store_options or {}
@@ -124,7 +124,6 @@ class IcechunkStoreBuilder:
         arguments in `__init__` together and not have to worry about ordering.
         """
 
-        self._esm_ds: esm_datastore | None
         if self._esm_ds is None:
             self._esm_ds = intake.open_esm_datastore(self.catalog_path)
         return self._esm_ds

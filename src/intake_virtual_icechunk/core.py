@@ -89,9 +89,10 @@ class IcechunkCatalog(Catalog):
         self.storage_options = storage_options or {}
         self.xarray_kwargs = xarray_kwargs or {}
         self.virtual_chunk_url_prefixes = virtual_chunk_url_prefixes or []
-        self._entries = {}
-        self.datasets = {}
-        self._allowed_keys = None  # None → all top-level groups from the store
+        self._entries: dict[str, IcechunkDataSource] = {}
+        self._allowed_keys: list[str] | None = (
+            None  # None → all top-level groups from the store
+        )
 
         # Lazily-opened backend objects
         self._open_repo = None

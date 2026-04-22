@@ -6,7 +6,9 @@ from urllib.parse import urlparse
 
 import icechunk
 from obspec_utils.registry import ObjectStoreRegistry
-from obstore.store import LocalStore, S3Store
+from obstore.store import AzureStore, GCSStore, LocalStore, S3Store
+
+__stores__ = ["LocalStore", "S3Store", "GCSStore", "AzureStore"]
 
 
 class IceChunkStoreError(Exception):
