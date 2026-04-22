@@ -238,9 +238,7 @@ class IcechunkStoreBuilder:
         config.set_virtual_chunk_container(
             icechunk.VirtualChunkContainer(
                 url_prefix=self.source_url_prefix,
-                store=icechunk.local_filesystem_store(
-                    self.source_url_prefix.removeprefix("file://")
-                ),
+                store=icechunk.local_filesystem_store(self.source_url_prefix),
             )
         )
         credentials = icechunk.containers_credentials({self.source_url_prefix: None})
@@ -249,6 +247,11 @@ class IcechunkStoreBuilder:
         # Persist the configuration so we don't need to figure it out when we come
         # back to open the store
         repo.save_config()
+
+        # Now, we need to persist the virtual chunk containers so that we can
+        # reinstantiate them when we open the store later, to avoid the 'safe by
+        # default' behaviour.
+        # self.vc_containers
 
         # ------------------------------------------------------------------
         # 3. Build each group inside a single transaction

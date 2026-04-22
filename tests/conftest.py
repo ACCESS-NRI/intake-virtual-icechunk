@@ -1,7 +1,14 @@
 # Copyright 2026 ACCESS-NRI and contributors. See the top-level COPYRIGHT file for details.
 # SPDX-License-Identifier: Apache-2.0
 
+from pathlib import Path
+
 import pytest
+
+
+@pytest.fixture(scope="session")
+def sample_data() -> Path:
+    return Path(__file__).parent / "data"
 
 
 @pytest.fixture(scope="session")
