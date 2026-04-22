@@ -116,8 +116,8 @@ test = { cmd = "pytest tests/" , description = "Run the test suite" }
 lint = { cmd = "ruff check src/" , description = "Run linting" }
 
 [tool.pixi.environments]
-default = { features = ["dev","py313","icechunk-1", "virtualizarr"], solve-group = "default" }
-icechunk-2 = { features = ["dev","py313","icechunk-2", "virtualizarr"], solve-group = "icechunk-2" }
+default = { features = ["dev","py313","icechunk-2", "virtualizarr"], solve-group = "default" }
+icechunk-1 = { features = ["dev","py313","icechunk-1", "virtualizarr"], solve-group = "icechunk-1" }
 test-py312 = ["test", "py312", "virtualizarr"]
 test-py313 = ["test", "py313", "virtualizarr"]
 test-py314 = ["test", "py314", "virtualizarr"]
