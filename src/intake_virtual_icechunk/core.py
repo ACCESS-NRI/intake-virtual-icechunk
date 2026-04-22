@@ -3,11 +3,13 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pandas as pd
 import zarr
 from intake.catalog import Catalog
 
-from .source import IcechunkDataSource
+from ._source import IcechunkDataSource
 
 
 def _match_query(attrs: dict, query: dict) -> bool:
@@ -71,15 +73,26 @@ class IcechunkCatalog(Catalog):
     container = "xarray"
 
     def __init__(
-        self, store, *, storage_options=None, xarray_kwargs=None, **intake_kwargs
+        self,
+        store: Path | str,
+        *,
+        storage_options=None,
+        xarray_kwargs=None,
+        virtual_chunk_url_prefixes=None,
+        **intake_kwargs,
     ):
         super().__init__(**intake_kwargs)
-        self.store = store
+        # Path may be passed as a string or a Path, we'll store it internally as
+        # a str, and convert back to a Path if and when where needed.
+        # TBC if this is a good idea.
+        self.store: str = str(store)
         self.storage_options = storage_options or {}
         self.xarray_kwargs = xarray_kwargs or {}
-        self._entries = {}
-        self.datasets = {}
-        self._allowed_keys = None  # None → all top-level groups from the store
+        self.virtual_chunk_url_prefixes = virtual_chunk_url_prefixes or []
+        self._entries: dict[str, IcechunkDataSource] = {}
+        self._allowed_keys: list[str] | None = (
+            None  # None → all top-level groups from the store
+        )
 
         # Lazily-opened backend objects
         self._open_repo = None
@@ -99,7 +112,14 @@ class IcechunkCatalog(Catalog):
             from ._storage import _resolve_storage
 
             storage = _resolve_storage(self.store, self.storage_options)
-            self._open_repo = icechunk.Repository.open(storage)
+            kwargs = {}
+            if self.virtual_chunk_url_prefixes:
+                kwargs["authorize_virtual_chunk_access"] = (
+                    icechunk.containers_credentials(
+                        {prefix: None for prefix in self.virtual_chunk_url_prefixes}
+                    )
+                )
+            self._open_repo = icechunk.Repository.open(storage, **kwargs)
         return self._open_repo
 
     @property
@@ -129,6 +149,7 @@ class IcechunkCatalog(Catalog):
             store=parent.store,
             storage_options=parent.storage_options,
             xarray_kwargs=parent.xarray_kwargs,
+            virtual_chunk_url_prefixes=parent.virtual_chunk_url_prefixes,
         )
         # Share the already-opened backend so we don't re-open the repo.
         cat._open_repo = parent._open_repo
@@ -168,6 +189,7 @@ class IcechunkCatalog(Catalog):
             store=model.store,
             storage_options=model.storage_options,
             xarray_kwargs=xarray_kwargs or {},
+            virtual_chunk_url_prefixes=model.virtual_chunk_url_prefixes,
         )
 
     # ------------------------------------------------------------------
@@ -271,6 +293,22 @@ class IcechunkCatalog(Catalog):
         except KeyError:
             return False
         return True
+
+    def __dir__(self) -> list[str]:
+        rv = [
+            "_repo",
+            "_zarr_store",
+            "_root_group",
+            "_from_parent",
+            "from_json",
+            "save",
+            "keys",
+            "search",
+            "df",
+            "to_dataset_dict",
+            "to_dask",
+        ]
+        return sorted(list(self.__dict__.keys()) + rv)
 
     # ------------------------------------------------------------------
     # Search and metadata

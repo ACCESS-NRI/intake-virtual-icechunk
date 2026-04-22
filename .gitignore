@@ -131,3 +131,6 @@ dmypy.json
 # Files
 sandpit.ipynb
 .DS_Store
+
+# Notebooks directory, where I want to do some fiddling
+notebooks/
