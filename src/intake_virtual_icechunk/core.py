@@ -165,7 +165,7 @@ class IcechunkCatalog(Catalog):
             store=parent.store,
             storage_options=parent.storage_options,
             xarray_kwargs=parent.xarray_kwargs,
-            virtual_chunk_url_prefixes=parent.virtual_chunk_url_prefixes,
+            virtual_chunk_model=parent.virtual_chunk_model,
         )
         # Share the already-opened backend so we don't re-open the repo.
         cat._open_repo = parent._open_repo
@@ -379,10 +379,6 @@ class IcechunkCatalog(Catalog):
             row.update(dict(self._root_group[key].attrs))
             records.append(row)
         return pd.DataFrame(records)
-
-    # ------------------------------------------------------------------
-    # Loading
-    # ------------------------------------------------------------------
 
     def to_dataset_dict(
         self,
