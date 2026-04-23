@@ -12,6 +12,8 @@ import fsspec
 import pydantic
 from pydantic import ConfigDict
 
+from intake_virtual_icechunk.source._containers import VirtualChunkContainerModel
+
 
 class VirtualIcechunkCatalogModel(pydantic.BaseModel):
     """
@@ -41,11 +43,11 @@ class VirtualIcechunkCatalogModel(pydantic.BaseModel):
     id: str = ""
     version: pydantic.StrictStr = "1.0.0"
     store: pydantic.StrictStr
+    virtual_chunk_model: VirtualChunkContainerModel
     description: pydantic.StrictStr | None = None
     title: pydantic.StrictStr | None = None
     last_updated: datetime.datetime | datetime.date | None = None
     storage_options: dict[str, typing.Any] = {}
-    virtual_chunk_url_prefixes: list[str] = []
 
     model_config = ConfigDict(validate_assignment=True)
 
@@ -87,7 +89,8 @@ class VirtualIcechunkCatalogModel(pydantic.BaseModel):
         Parameters
         ----------
         name : str
-            Stem of the output file (without the ``.json`` extension).
+            Stem of the output file. If it ends with '.json' it will be stripped
+            and re-!dded to ensuer we get a single `.json` ext, no matter what.
         directory : str, optional
             Directory or cloud storage bucket to write the file to.
             Defaults to the current working directory.
@@ -100,6 +103,8 @@ class VirtualIcechunkCatalogModel(pydantic.BaseModel):
         """
         if directory is None:
             directory = os.getcwd()
+
+        name = name.removesuffix(".json")
 
         storage_options = storage_options or {}
         mapper = fsspec.get_mapper(directory, **storage_options)

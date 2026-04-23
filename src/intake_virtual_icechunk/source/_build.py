@@ -2,8 +2,8 @@ from __future__ import annotations
 
 # Copyright 2026 ACCESS-NRI and contributors. See the top-level COPYRIGHT file for details.
 # SPDX-License-Identifier: Apache-2.0
-import os
 from dataclasses import astuple, dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import icechunk
@@ -12,8 +12,12 @@ import zarr
 from intake_esm.core import esm_datastore
 from virtualizarr import open_virtual_mfdataset
 
-from .._storage import _resolve_storage, _resolve_store
-from ..cat import VirtualIcechunkCatalogModel
+from intake_virtual_icechunk.source._containers import VirtualChunkContainerModel
+from intake_virtual_icechunk.utils import (
+    _intake_cat_filename,
+    _resolve_storage,
+    _resolve_store,
+)
 
 if TYPE_CHECKING:
     from obspec_utils.registry import ObjectStoreRegistry
@@ -224,6 +228,7 @@ class IcechunkStoreBuilder:
         ``groupby_attrs``, so the Icechunk store structure mirrors the
         intake-esm grouping.
         """
+        from intake_virtual_icechunk.cat import VirtualIcechunkCatalogModel
 
         esmcat = self.esm_ds.esmcat
         groupby_attrs, assets_col = astuple(self._extract_datastore_structure())
@@ -234,13 +239,14 @@ class IcechunkStoreBuilder:
 
         storage = _resolve_storage(self.store_path, self.storage_options)
 
-        config = icechunk.RepositoryConfig.default()
-        config.set_virtual_chunk_container(
-            icechunk.VirtualChunkContainer(
-                url_prefix=self.source_url_prefix,
-                store=icechunk.local_filesystem_store(self.source_url_prefix),
-            )
+        self.vc_container = icechunk.VirtualChunkContainer(
+            url_prefix=self.source_url_prefix,
+            store=icechunk.local_filesystem_store(self.source_url_prefix),
         )
+
+        config = icechunk.RepositoryConfig.default()
+        config.set_virtual_chunk_container(self.vc_container)
+
         credentials = icechunk.containers_credentials({self.source_url_prefix: None})
         repo = icechunk.Repository.create(storage, config, credentials)
 
@@ -300,13 +306,18 @@ class IcechunkStoreBuilder:
                     print(f"Failed to virtualise group {public_key}: {e}")
 
         # Write the JSON sidecar inside the store directory
-        store_path_obj = os.path.abspath(os.path.expanduser(self.store_path))
-        sidecar_name = os.path.splitext(os.path.basename(store_path_obj))[0]
-        sidecar_dir = store_path_obj
+
+        # Might not be safe on object stores - deal with that later.
+        storepath = Path(self.store_path).expanduser()
+        sidecar_fname = _intake_cat_filename(self.store_path)
+
+        sidecar_dir = str(storepath)
 
         model = VirtualIcechunkCatalogModel(
             store=self.store_path,
             storage_options=self.storage_options,
-            virtual_chunk_url_prefixes=[self.source_url_prefix],
+            virtual_chunk_model=VirtualChunkContainerModel.from_virtual_chunk_container(
+                self.vc_container
+            ),
         )
-        model.save(sidecar_name, directory=sidecar_dir or None)
+        model.save(sidecar_fname, directory=sidecar_dir or None)
