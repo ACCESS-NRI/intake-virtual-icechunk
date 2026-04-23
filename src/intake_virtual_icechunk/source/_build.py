@@ -10,7 +10,7 @@ import icechunk
 import intake
 import zarr
 from intake_esm.core import esm_datastore
-from virtualizarr import open_virtual_mfdataset
+from virtualizarr import open_virtual_dataset, open_virtual_mfdataset
 
 from intake_virtual_icechunk.source._containers import VirtualChunkContainerModel
 from intake_virtual_icechunk.utils import (
@@ -263,35 +263,32 @@ class IcechunkStoreBuilder:
         # 3. Build each group inside a single transaction
         # ------------------------------------------------------------------
         group_key_map = esmcat._construct_group_keys()
-        self.failed_list = []
+        self.failed_list: list[tuple[str, Exception]] = []
 
         with repo.transaction(
             "main", message=f"Build Virtual Icechunk catalog for {self.esm_ds.name}"
         ) as store:
             for public_key, internal_key in group_key_map.items():
+                grouped = esmcat.grouped
+                group_df = grouped.get_group(internal_key)
+
+                # Collect group-level metadata for .zattrs
+                group_attrs: dict = {}
+                for attr in groupby_attrs:
+                    if attr in group_df.columns:
+                        group_attrs[attr] = group_df[attr].iloc[0]
+
+                # Collect asset file paths for this group
+                file_paths: list[str] = group_df[assets_col].tolist()
                 try:
-                    grouped = esmcat.grouped
-                    group_df = grouped.get_group(internal_key)
-
-                    # Collect group-level metadata for .zattrs
-                    group_attrs: dict = {}
-                    for attr in groupby_attrs:
-                        if attr in group_df.columns:
-                            group_attrs[attr] = group_df[attr].iloc[0]
-
-                    # Collect asset file paths for this group
-                    file_paths: list[str] = group_df[assets_col].tolist()
-
                     with open_virtual_mfdataset(
                         urls=file_paths,
                         parser=self.parser,
                         registry=self.obsstore_registry,
                         parallel="dask",
                         decode_times=False,
-                        combine="nested",
-                        concat_dim="time",
+                        coords="minimal",
                         compat="override",
-                        coords=["time"],
                     ) as vds:
                         vds.vz.to_icechunk(store, group=public_key)
 
@@ -301,6 +298,28 @@ class IcechunkStoreBuilder:
                     zarr_group.attrs.update(group_attrs)
 
                     print(f"Virtualised group {public_key} successfully!")
+                except ValueError as e:
+                    if (
+                        "Could not find any dimension coordinates to use to order the Dataset objects for concatenation"
+                        not in str(e)
+                    ):
+                        self.failed_list.append((public_key, e))
+                        print(f"Failed to virtualise group {public_key}: {e}")
+                    else:
+                        with open_virtual_dataset(
+                            url=file_paths[0],
+                            parser=self.parser,
+                            registry=self.obsstore_registry,
+                            decode_times=False,
+                        ) as vds:
+                            vds.vz.to_icechunk(store, group=public_key)
+                        # Write group metadata into .zattrs so the catalog can search
+                        # these groups without opening the arrays.
+                        zarr_group = zarr.open_group(store, path=public_key, mode="a")
+                        zarr_group.attrs.update(group_attrs)
+
+                        print(f"Virtualised group {public_key} successfully!")
+
                 except Exception as e:
                     self.failed_list.append((public_key, e))
                     print(f"Failed to virtualise group {public_key}: {e}")
