@@ -17,7 +17,6 @@ __all__ = ["IcechunkStoreBuilder", "pytest"]
 
 @pytest.fixture(scope="session")
 def local_om2_datastore_path(sample_data) -> Path:
-
     data_root = sample_data / "access-om2"
     catalog_dir = sample_data / "access-om2" / "esmcat"
 
