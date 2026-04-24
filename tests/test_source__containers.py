@@ -10,6 +10,22 @@ import pytest
 from intake_virtual_icechunk.source import VirtualChunkContainerModel
 
 
+def test_build_config_unknown_store(sample_data):
+    """
+    Test that we raise an error if we try to build an ObjectStoreConfig for a store type
+    that we don't know about. This is a bit of a hack, but it ensures that we don't silently
+    fail and create a store that doesn't work when we try to open the catalog later on.
+    """
+    config_model = VirtualChunkContainerModel(
+        url_prefix=f"file://{sample_data}/",
+        store_type="UnknownStore",
+        open_kwargs={},
+    )
+
+    with pytest.raises(ValueError, match="Unsupported store type: 'UnknownStore'"):
+        config_model._build_object_store_config()
+
+
 class StoreTests:
     """
     Base class / mixin that we can use to ensure that each store type that we are

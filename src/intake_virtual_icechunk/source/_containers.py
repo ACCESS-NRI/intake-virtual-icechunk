@@ -80,7 +80,7 @@ class VirtualChunkContainerModel:
         store_type = STORE_TYPE_MAP.get(self.store_type, None)
 
         if store_type is None:
-            raise ValueError(f"Unsupported store type: {store_type!r}")
+            raise ValueError(f"Unsupported store type: {self.store_type!r}")
         return store_type(self.url_prefix, **self.open_kwargs)
 
     def to_dict(self) -> dict:

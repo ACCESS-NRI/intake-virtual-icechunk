@@ -85,6 +85,7 @@ pdbpp = ">=0.11.7,<0.12"
 ipykernel = ">=7.2.0,<8"
 jupyterlab = ">=4.5.6,<5"
 pytest = ">=9.0.3,<10"
+pytest-cov = "*"
 h5py = "*"
 access-intake-esm = ">=2026.4.19,<2027"
 access-nri-intake = ">=1.6.0,<2"
@@ -92,6 +93,7 @@ netcdf4 = ">=1.7.4,<2"
 
 [tool.pixi.feature.dev.tasks]
 setup-ipykernel = {cmd= "python -m ipykernel install --user --name=intake-virtual-icechunk-dev", description = "Set up the ipykernel for the dev environment"}
+test-coverage = { cmd = "pytest tests/ --cov=intake_virtual_icechunk --cov-report=html --cov-report=term", description = "Run tests locally with coverage and open the HTML report" }
 
 [tool.pixi.feature.test.pypi-dependencies]
 intake_virtual_icechunk = { path = ".", editable = false }
