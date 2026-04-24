@@ -7815,8 +7815,21 @@ packages:
   timestamp: 1776309572433
 - pypi: ./
   name: intake-virtual-icechunk
-  version: 0.0.5.dev38+g67a6ecb86
-  sha256: 8fe175dcba832b4433bec367222c68d7ad66a865c740b0478d157fcd5b6181b4
+  version: 0.0.5.dev39+g362eaf7c4.d20260424
+  sha256: 274ca536939c2a6438d94067fd879cc809861a75df9ace66ff4c34b38ea33ec9
+  requires_dist:
+  - intake>=2.0.0
+  - icechunk
+  - intake-esm
+  - zarr
+  - pytest ; extra == 'test'
+  - pytest-cov ; extra == 'test'
+  - virtualizarr ; extra == 'virtualizarr'
+  requires_python: '>=3.12'
+- pypi: ./
+  name: intake-virtual-icechunk
+  version: 0.0.5.dev39+g362eaf7c4.d20260424
+  sha256: b8972517651e65a263fa5663f28dd3fdb208e7d588973bef1a1b3e3c63d30326
   requires_dist:
   - intake>=2.0.0
   - icechunk

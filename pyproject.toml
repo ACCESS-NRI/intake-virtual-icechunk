@@ -113,6 +113,7 @@ ruff = "*"
 
 [tool.pixi.feature.test.tasks]
 test = { cmd = "pytest tests/" , description = "Run the test suite" }
+test-cov = {cmd = "coverage run -m --source=intake_virtual_icechunk pytest tests && coverage xml", description = "Run tests with coverage and generate xml report"}
 lint = { cmd = "ruff check src/" , description = "Run linting" }
 
 [tool.pixi.environments]
