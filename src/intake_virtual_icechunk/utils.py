@@ -1,7 +1,11 @@
-# Copyright 2026 ACCESS-NRI and contributors. See the top-level COPYRIGHT file for details.
-# SPDX-License-Identifier: Apache-2.0
+"""
+Copyright 2026 ACCESS-NRI and contributors. See the top-level COPYRIGHT file for details.
+SPDX-License-Identifier: Apache-2.0
+"""
 
 import os
+from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 
 import icechunk
@@ -83,7 +87,7 @@ def _resolve_storage(store: str, storage_options: dict) -> icechunk.Storage:
 
 def _resolve_store(
     paths: str | list[str], store_options: dict
-) -> tuple[ObjectStoreRegistry, str]:
+) -> tuple[ObjectStoreRegistry[Any], str]:
     """
     Virtualizarr requires us to create an obstore registry for the source data.
     This function resolves the catalog's asset paths to an appropriate obstore
@@ -155,3 +159,27 @@ def _resolve_store(
         f"Unsupported store scheme: {scheme!r}. "
         "Expected a local path or one of s3://, gs://, gcs://, az://."
     )
+
+
+def _intake_cat_filename(store_path: Path | str) -> str:
+    """
+    Generate a JSON sidecar filename for an Icechunk store.
+
+    The sidecar is named ``_intake_{store_name}.json``, where ``store_name`` is
+    the stem of the store path (i.e. the filename without extension).  This
+    ensures that the sidecar is easily identifiable and avoids potential
+    conflicts with other files in the same directory.
+
+    Parameters
+    ----------
+    store_path : str
+        The path to the Icechunk store (e.g. ``/path/to/store.icechunk``).
+
+    Returns
+    -------
+    str
+        The generated sidecar filename (e.g. ``_intake_store.json``).
+    """
+
+    store_path_obj = Path(store_path)
+    return f"_intake_{store_path_obj.stem}.json"

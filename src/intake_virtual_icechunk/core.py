@@ -3,13 +3,16 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pandas as pd
 import zarr
 from intake.catalog import Catalog
 
-from ._source import IcechunkDataSource
+from intake_virtual_icechunk._source import IcechunkDataSource
+from intake_virtual_icechunk.source._containers import VirtualChunkContainerModel
+from intake_virtual_icechunk.utils import _intake_cat_filename, _resolve_storage
 
 
 def _match_query(attrs: dict, query: dict) -> bool:
@@ -78,7 +81,7 @@ class IcechunkCatalog(Catalog):
         *,
         storage_options=None,
         xarray_kwargs=None,
-        virtual_chunk_url_prefixes=None,
+        virtual_chunk_model=None,
         **intake_kwargs,
     ):
         super().__init__(**intake_kwargs)
@@ -86,9 +89,23 @@ class IcechunkCatalog(Catalog):
         # a str, and convert back to a Path if and when where needed.
         # TBC if this is a good idea.
         self.store: str = str(store)
-        self.storage_options = storage_options or {}
-        self.xarray_kwargs = xarray_kwargs or {}
-        self.virtual_chunk_url_prefixes = virtual_chunk_url_prefixes or []
+
+        self.store_json = Path(self.store) / _intake_cat_filename(self.store)
+
+        with open(self.store_json) as f:
+            metadata = json.load(f)
+            self.storage_options = storage_options or metadata.get(
+                "storage_options", {}
+            )
+            self.xarray_kwargs = storage_options or metadata.get("xarray_kwargs", {})
+            self.virtual_chunk_model = VirtualChunkContainerModel.from_dict(
+                storage_options or metadata.get("virtual_chunk_model", {})
+            )
+
+        self.virtual_chunk_container = (
+            self.virtual_chunk_model.to_virtual_chunk_container()
+        )
+
         self._entries: dict[str, IcechunkDataSource] = {}
         self._allowed_keys: list[str] | None = (
             None  # None → all top-level groups from the store
@@ -109,17 +126,16 @@ class IcechunkCatalog(Catalog):
         if self._open_repo is None:
             import icechunk
 
-            from ._storage import _resolve_storage
-
             storage = _resolve_storage(self.store, self.storage_options)
-            kwargs = {}
-            if self.virtual_chunk_url_prefixes:
-                kwargs["authorize_virtual_chunk_access"] = (
-                    icechunk.containers_credentials(
-                        {prefix: None for prefix in self.virtual_chunk_url_prefixes}
-                    )
-                )
-            self._open_repo = icechunk.Repository.open(storage, **kwargs)
+
+            credentials = icechunk.containers_credentials(
+                {self.virtual_chunk_model.url_prefix: None}
+            )
+
+            self._open_repo = icechunk.Repository.open(
+                storage,
+                authorize_virtual_chunk_access=credentials,
+            )
         return self._open_repo
 
     @property
@@ -149,7 +165,7 @@ class IcechunkCatalog(Catalog):
             store=parent.store,
             storage_options=parent.storage_options,
             xarray_kwargs=parent.xarray_kwargs,
-            virtual_chunk_url_prefixes=parent.virtual_chunk_url_prefixes,
+            virtual_chunk_model=parent.virtual_chunk_model,
         )
         # Share the already-opened backend so we don't re-open the repo.
         cat._open_repo = parent._open_repo
@@ -189,7 +205,7 @@ class IcechunkCatalog(Catalog):
             store=model.store,
             storage_options=model.storage_options,
             xarray_kwargs=xarray_kwargs or {},
-            virtual_chunk_url_prefixes=model.virtual_chunk_url_prefixes,
+            virtual_chunk_model=model.virtual_chunk_model,
         )
 
     # ------------------------------------------------------------------
@@ -221,6 +237,7 @@ class IcechunkCatalog(Catalog):
         model = VirtualIcechunkCatalogModel(
             store=self.store,
             storage_options=self.storage_options,
+            virtual_chunk_model=self.virtual_chunk_model,
         )
         model.save(name, directory=directory, json_dump_kwargs=json_dump_kwargs)
 
@@ -362,10 +379,6 @@ class IcechunkCatalog(Catalog):
             row.update(dict(self._root_group[key].attrs))
             records.append(row)
         return pd.DataFrame(records)
-
-    # ------------------------------------------------------------------
-    # Loading
-    # ------------------------------------------------------------------
 
     def to_dataset_dict(
         self,

@@ -1,7 +1,14 @@
 # Copyright 2026 ACCESS-NRI and contributors. See the top-level COPYRIGHT file for details.
 # SPDX-License-Identifier: Apache-2.0
 
+from pathlib import Path
+
 import pytest
+
+
+@pytest.fixture(scope="session")
+def sample_data() -> Path:
+    return Path(__file__).parent / "data"
 
 
 @pytest.fixture(scope="session")
@@ -34,42 +41,18 @@ def groups():
     ]
 
 
-@pytest.fixture(scope="session")
-def icechunk_store_path(tmp_path_factory, groups):
+@pytest.fixture
+def icechunk_store_path(sample_data) -> Path:
     """
-    Create a minimal Icechunk store for testing.
-
-    The store has one top-level Zarr group per entry in ``GROUPS``.  Each
-    group contains a single 1-D float32 array (``temperature``) and has its
-    metadata written into ``.zattrs``.
+    Use a minimal icechunk store for testing. This is
     """
-    import icechunk
-    import numpy as np
-    import zarr
-
-    store_path = str(tmp_path_factory.mktemp("stores") / "test.icechunk")
-    storage = icechunk.local_filesystem_storage(store_path)
-    repo = icechunk.Repository.create(storage)
-
-    with repo.transaction("main", message="Initialise test catalog") as store:
-        for entry in groups:
-            grp = zarr.open_group(store, path=entry["key"], mode="w")
-            grp.attrs.update(entry["attrs"])
-            grp.create_array("temperature", data=np.zeros(10))
-
-    return store_path
+    return sample_data / "access-om2" / "icecat.icechunk"
 
 
-@pytest.fixture(scope="session")
-def catalog_json_path(tmp_path_factory, icechunk_store_path):
-    """Write a JSON sidecar for the test Icechunk store and return its path."""
-    from intake_virtual_icechunk.cat import VirtualIcechunkCatalogModel
+@pytest.fixture
+def catalog_json_path(icechunk_store_path) -> Path:
+    from intake_virtual_icechunk.utils import _intake_cat_filename
 
-    out_dir = str(tmp_path_factory.mktemp("catalogs"))
-    model = VirtualIcechunkCatalogModel(
-        store=icechunk_store_path,
-        description="Test catalog",
-        title="Test",
-    )
-    model.save("test-catalog", directory=out_dir)
-    return f"{out_dir}/test-catalog.json"
+    fname = _intake_cat_filename(icechunk_store_path)
+
+    return icechunk_store_path / fname

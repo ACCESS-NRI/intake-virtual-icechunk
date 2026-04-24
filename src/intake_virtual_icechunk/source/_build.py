@@ -2,18 +2,22 @@ from __future__ import annotations
 
 # Copyright 2026 ACCESS-NRI and contributors. See the top-level COPYRIGHT file for details.
 # SPDX-License-Identifier: Apache-2.0
-import os
 from dataclasses import astuple, dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import icechunk
 import intake
 import zarr
 from intake_esm.core import esm_datastore
-from virtualizarr import open_virtual_mfdataset
+from virtualizarr import open_virtual_dataset, open_virtual_mfdataset
 
-from .._storage import _resolve_storage, _resolve_store
-from ..cat import VirtualIcechunkCatalogModel
+from intake_virtual_icechunk.source._containers import VirtualChunkContainerModel
+from intake_virtual_icechunk.utils import (
+    _intake_cat_filename,
+    _resolve_storage,
+    _resolve_store,
+)
 
 if TYPE_CHECKING:
     from obspec_utils.registry import ObjectStoreRegistry
@@ -83,8 +87,8 @@ class IcechunkStoreBuilder:
 
     Parameters
     ----------
-    catalog_path : str
-        Path to an existing intake-esm catalog JSON file.
+    catalog_path : Path : str
+        Path to an existing intake-esm catalog JSON file. Stored internally as a string.
     store_path : str
         Path or URI at which to create (or open) the Icechunk store.
         Supported schemes: local path, ``s3://``, ``gs://`` / ``gcs://``,
@@ -101,14 +105,17 @@ class IcechunkStoreBuilder:
 
     def __init__(
         self,
-        catalog_path: str,
-        store_path: str,
+        esm_datastore_path: Path | str,
+        esm_datastore_kwargs: dict | None,
+        store_path: Path | str,
         parser: VirtualizarrParser | None = None,
         storage_options: dict | None = None,
         store_options: dict | None = None,
     ):
-        self.catalog_path = catalog_path
-        self.store_path = store_path
+        self.esm_datastore_path = str(esm_datastore_path)
+        self.esm_datastore_kwargs = esm_datastore_kwargs or {}
+
+        self.store_path = str(store_path)
         self._esm_ds: esm_datastore | None = None
 
         self.storage_options = storage_options or {}
@@ -125,13 +132,18 @@ class IcechunkStoreBuilder:
         """
 
         if self._esm_ds is None:
-            self._esm_ds = intake.open_esm_datastore(self.catalog_path)
+            self._esm_ds = intake.open_esm_datastore(
+                self.esm_datastore_path, **self.esm_datastore_kwargs
+            )
         return self._esm_ds
 
     def _infer_parser(self) -> VirtualizarrParser:
         """
         We can infer the parser from the esm datastore, since it's specification
-        contains it. We use this to determinte the parser
+        contains it. We use this to determinte the parser.
+
+        Warning: Calling this function *does not* set the builder's parser attribute.
+        It also returns a type, not an instance.
         """
         from virtualizarr import parsers
 
@@ -224,6 +236,7 @@ class IcechunkStoreBuilder:
         ``groupby_attrs``, so the Icechunk store structure mirrors the
         intake-esm grouping.
         """
+        from intake_virtual_icechunk.cat import VirtualIcechunkCatalogModel
 
         esmcat = self.esm_ds.esmcat
         groupby_attrs, assets_col = astuple(self._extract_datastore_structure())
@@ -234,15 +247,14 @@ class IcechunkStoreBuilder:
 
         storage = _resolve_storage(self.store_path, self.storage_options)
 
-        config = icechunk.RepositoryConfig.default()
-        config.set_virtual_chunk_container(
-            icechunk.VirtualChunkContainer(
-                url_prefix=self.source_url_prefix,
-                store=icechunk.local_filesystem_store(
-                    self.source_url_prefix.removeprefix("file://")
-                ),
-            )
+        self.vc_container = icechunk.VirtualChunkContainer(
+            url_prefix=self.source_url_prefix,
+            store=icechunk.local_filesystem_store(self.source_url_prefix),
         )
+
+        config = icechunk.RepositoryConfig.default()
+        config.set_virtual_chunk_container(self.vc_container)
+
         credentials = icechunk.containers_credentials({self.source_url_prefix: None})
         repo = icechunk.Repository.create(storage, config, credentials)
 
@@ -250,39 +262,41 @@ class IcechunkStoreBuilder:
         # back to open the store
         repo.save_config()
 
+        # Now, we need to persist the virtual chunk containers so that we can
+        # reinstantiate them when we open the store later, to avoid the 'safe by
+        # default' behaviour.
+        # self.vc_containers
+
         # ------------------------------------------------------------------
         # 3. Build each group inside a single transaction
         # ------------------------------------------------------------------
         group_key_map = esmcat._construct_group_keys()
-        self.failed_list = []
+        self.failed_list: list[tuple[str, Exception]] = []
 
         with repo.transaction(
             "main", message=f"Build Virtual Icechunk catalog for {self.esm_ds.name}"
         ) as store:
             for public_key, internal_key in group_key_map.items():
+                grouped = esmcat.grouped
+                group_df = grouped.get_group(internal_key)
+
+                # Collect group-level metadata for .zattrs
+                group_attrs: dict = {}
+                for attr in groupby_attrs:
+                    if attr in group_df.columns:
+                        group_attrs[attr] = group_df[attr].iloc[0]
+
+                # Collect asset file paths for this group
+                file_paths: list[str] = group_df[assets_col].tolist()
                 try:
-                    grouped = esmcat.grouped
-                    group_df = grouped.get_group(internal_key)
-
-                    # Collect group-level metadata for .zattrs
-                    group_attrs: dict = {}
-                    for attr in groupby_attrs:
-                        if attr in group_df.columns:
-                            group_attrs[attr] = group_df[attr].iloc[0]
-
-                    # Collect asset file paths for this group
-                    file_paths: list[str] = group_df[assets_col].tolist()
-
                     with open_virtual_mfdataset(
                         urls=file_paths,
                         parser=self.parser,
                         registry=self.obsstore_registry,
                         parallel="dask",
                         decode_times=False,
-                        combine="nested",
-                        concat_dim="time",
+                        coords="minimal",
                         compat="override",
-                        coords=["time"],
                     ) as vds:
                         vds.vz.to_icechunk(store, group=public_key)
 
@@ -293,17 +307,44 @@ class IcechunkStoreBuilder:
 
                     print(f"Virtualised group {public_key} successfully!")
                 except Exception as e:
+                    if (
+                        "Could not find any dimension coordinates to use to order the Dataset objects for concatenation"
+                        not in str(e)
+                    ):
+                        self.failed_list.append((public_key, e))
+                        print(f"Failed to virtualise group {public_key}: {e}")
+                    else:
+                        with open_virtual_dataset(
+                            url=file_paths[0],
+                            parser=self.parser,
+                            registry=self.obsstore_registry,
+                            decode_times=False,
+                        ) as vds:
+                            vds.vz.to_icechunk(store, group=public_key)
+                        # Write group metadata into .zattrs so the catalog can search
+                        # these groups without opening the arrays.
+                        zarr_group = zarr.open_group(store, path=public_key, mode="a")
+                        zarr_group.attrs.update(group_attrs)
+
+                        print(f"Virtualised group {public_key} successfully!")
+
+                except Exception as e:
                     self.failed_list.append((public_key, e))
                     print(f"Failed to virtualise group {public_key}: {e}")
 
         # Write the JSON sidecar inside the store directory
-        store_path_obj = os.path.abspath(os.path.expanduser(self.store_path))
-        sidecar_name = os.path.splitext(os.path.basename(store_path_obj))[0]
-        sidecar_dir = store_path_obj
+
+        # Might not be safe on object stores - deal with that later.
+        storepath = Path(self.store_path).expanduser()
+        sidecar_fname = _intake_cat_filename(self.store_path)
+
+        sidecar_dir = str(storepath)
 
         model = VirtualIcechunkCatalogModel(
             store=self.store_path,
             storage_options=self.storage_options,
-            virtual_chunk_url_prefixes=[self.source_url_prefix],
+            virtual_chunk_model=VirtualChunkContainerModel.from_virtual_chunk_container(
+                self.vc_container
+            ),
         )
-        model.save(sidecar_name, directory=sidecar_dir or None)
+        model.save(sidecar_fname, directory=sidecar_dir or None)
