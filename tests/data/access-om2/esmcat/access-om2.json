@@ -77,8 +77,8 @@
     ]
   },
   "id": "access-om2",
-  "description": "esm_datastore for the model output in '/tests/data/access-om2'",
+  "description": "esm_datastore for the model output in '/Users/u1166368/catalog/intake-virtual-icechunk/tests/data/access-om2'",
   "title": null,
-  "last_updated": "2026-04-23T03:12:18Z",
-  "catalog_file": "access-om2.csv"
+  "last_updated": "2026-04-24T04:17:54Z",
+  "catalog_file": "file:///Users/u1166368/catalog/intake-virtual-icechunk/tests/data/access-om2/esmcat/access-om2.csv"
 }

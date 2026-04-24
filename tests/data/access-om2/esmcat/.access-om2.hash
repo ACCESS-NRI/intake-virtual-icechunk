@@ -1,0 +1,51 @@
+format: yamanifest
+version: 1.0
+---
+/Users/u1166368/catalog/intake-virtual-icechunk/tests/data/access-om2/output000/ice/OUTPUT/iceh.1900-01.nc:
+  fullpath: /Users/u1166368/catalog/intake-virtual-icechunk/tests/data/access-om2/output000/ice/OUTPUT/iceh.1900-01.nc
+  hashes:
+    binhash-xxh: 2a4d27eeebd71ff0
+/Users/u1166368/catalog/intake-virtual-icechunk/tests/data/access-om2/output000/ocean/ocean.nc:
+  fullpath: /Users/u1166368/catalog/intake-virtual-icechunk/tests/data/access-om2/output000/ocean/ocean.nc
+  hashes:
+    binhash-xxh: 6f8bbe614ede0077
+/Users/u1166368/catalog/intake-virtual-icechunk/tests/data/access-om2/output000/ocean/ocean_grid.nc:
+  fullpath: /Users/u1166368/catalog/intake-virtual-icechunk/tests/data/access-om2/output000/ocean/ocean_grid.nc
+  hashes:
+    binhash-xxh: 541b1ea9c780565d
+/Users/u1166368/catalog/intake-virtual-icechunk/tests/data/access-om2/output000/ocean/ocean_month.nc:
+  fullpath: /Users/u1166368/catalog/intake-virtual-icechunk/tests/data/access-om2/output000/ocean/ocean_month.nc
+  hashes:
+    binhash-xxh: 07bd52574176c293
+/Users/u1166368/catalog/intake-virtual-icechunk/tests/data/access-om2/output000/ocean/ocean_month_inst_nobounds.nc:
+  fullpath: /Users/u1166368/catalog/intake-virtual-icechunk/tests/data/access-om2/output000/ocean/ocean_month_inst_nobounds.nc
+  hashes:
+    binhash-xxh: 06fbe1e045b26099
+/Users/u1166368/catalog/intake-virtual-icechunk/tests/data/access-om2/output000/ocean/ocean_scalar.nc:
+  fullpath: /Users/u1166368/catalog/intake-virtual-icechunk/tests/data/access-om2/output000/ocean/ocean_scalar.nc
+  hashes:
+    binhash-xxh: 6942e2b869e93aca
+/Users/u1166368/catalog/intake-virtual-icechunk/tests/data/access-om2/output001/ice/OUTPUT/iceh.1910-01.nc:
+  fullpath: /Users/u1166368/catalog/intake-virtual-icechunk/tests/data/access-om2/output001/ice/OUTPUT/iceh.1910-01.nc
+  hashes:
+    binhash-xxh: 2adbf3d82c2ef741
+/Users/u1166368/catalog/intake-virtual-icechunk/tests/data/access-om2/output001/ocean/ocean.nc:
+  fullpath: /Users/u1166368/catalog/intake-virtual-icechunk/tests/data/access-om2/output001/ocean/ocean.nc
+  hashes:
+    binhash-xxh: 18608ca7ecaf16f7
+/Users/u1166368/catalog/intake-virtual-icechunk/tests/data/access-om2/output001/ocean/ocean_grid.nc:
+  fullpath: /Users/u1166368/catalog/intake-virtual-icechunk/tests/data/access-om2/output001/ocean/ocean_grid.nc
+  hashes:
+    binhash-xxh: 0f8bc6966ed2a361
+/Users/u1166368/catalog/intake-virtual-icechunk/tests/data/access-om2/output001/ocean/ocean_month.nc:
+  fullpath: /Users/u1166368/catalog/intake-virtual-icechunk/tests/data/access-om2/output001/ocean/ocean_month.nc
+  hashes:
+    binhash-xxh: bdf4e1fd0dc0f569
+/Users/u1166368/catalog/intake-virtual-icechunk/tests/data/access-om2/output001/ocean/ocean_month_inst_nobounds.nc:
+  fullpath: /Users/u1166368/catalog/intake-virtual-icechunk/tests/data/access-om2/output001/ocean/ocean_month_inst_nobounds.nc
+  hashes:
+    binhash-xxh: df79f537c0ff5ec6
+/Users/u1166368/catalog/intake-virtual-icechunk/tests/data/access-om2/output001/ocean/ocean_scalar.nc:
+  fullpath: /Users/u1166368/catalog/intake-virtual-icechunk/tests/data/access-om2/output001/ocean/ocean_scalar.nc
+  hashes:
+    binhash-xxh: da79ce4dd18f4b55

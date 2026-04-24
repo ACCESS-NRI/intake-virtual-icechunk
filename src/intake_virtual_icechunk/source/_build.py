@@ -87,8 +87,8 @@ class IcechunkStoreBuilder:
 
     Parameters
     ----------
-    catalog_path : str
-        Path to an existing intake-esm catalog JSON file.
+    catalog_path : Path : str
+        Path to an existing intake-esm catalog JSON file. Stored internally as a string.
     store_path : str
         Path or URI at which to create (or open) the Icechunk store.
         Supported schemes: local path, ``s3://``, ``gs://`` / ``gcs://``,
