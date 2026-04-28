@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+from functools import cached_property
 from pathlib import Path
 
 import pandas as pd
@@ -101,6 +102,7 @@ class IcechunkCatalog(Catalog):
             self.virtual_chunk_model = VirtualChunkContainerModel.from_dict(
                 storage_options or metadata.get("virtual_chunk_model", {})
             )
+            self._id = metadata.get("id", None)
 
         self.virtual_chunk_container = (
             self.virtual_chunk_model.to_virtual_chunk_container()
@@ -268,10 +270,24 @@ class IcechunkCatalog(Catalog):
         return f"<IcechunkCatalog with {len(self)} dataset(s) from {self.store!r}>"
 
     def _repr_html_(self):
-        return (
-            f"<p><strong>IcechunkCatalog with {len(self)} dataset(s)</strong> "
-            f"from <code>{self.store}</code></p>"
-        )
+        """
+        Generate a pretty representation of the catalog for display in Jupyter notebooks.
+        """
+
+        # uniques = pd.DataFrame(self.nunique(), columns=["unique"])
+        # text = uniques._repr_html_()
+        text = ""
+
+        return f"<p><strong>{self._id or ''} catalog with {len(self)} dataset(s) from {len(self.df)} asset(s)</strong>:</p> {text}"
+
+    def _ipython_display_(self):
+        """
+        Display the entry as a rich object in an IPython session
+        """
+        from IPython.display import HTML, display
+
+        contents = self._repr_html_()
+        display(HTML(contents))
 
     def __getitem__(self, key: str) -> IcechunkDataSource:
         """
@@ -363,7 +379,7 @@ class IcechunkCatalog(Catalog):
         ]
         return IcechunkCatalog._from_parent(self, matched)
 
-    @property
+    @cached_property
     def df(self) -> pd.DataFrame:
         """
         Return a :class:`~pandas.DataFrame` of all catalog entry metadata.
@@ -377,6 +393,7 @@ class IcechunkCatalog(Catalog):
         for key in self.keys():
             row: dict = {"key": key}
             row.update(dict(self._root_group[key].attrs))
+            row.update({"variables": list(self._root_group[key].keys())})
             records.append(row)
         return pd.DataFrame(records)
 
