@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import json
-import warnings
+import sys
 from pathlib import Path
 
 import pandas as pd
@@ -13,7 +13,15 @@ from intake.catalog import Catalog
 
 from intake_virtual_icechunk._source import IcechunkDataSource
 from intake_virtual_icechunk.source._containers import VirtualChunkContainerModel
-from intake_virtual_icechunk.utils import _intake_cat_filename, _resolve_storage
+from intake_virtual_icechunk.utils import (
+    _intake_cat_filename,
+    _resolve_storage,
+)
+
+if sys.version_info >= (3, 13):
+    from warnings import deprecated
+else:
+    from typing_extensions import deprecated
 
 
 def _match_query(attrs: dict, query: dict) -> bool:
@@ -455,8 +463,17 @@ class IcechunkCatalog(Catalog):
         _, ds = res.popitem()
         return ds
 
-    @warnings.deprecated(
+    @deprecated(
         "to_dask() is deprecated; use to_xarray() instead.", category=FutureWarning
     )
     def to_dask(self, *args, **kwargs):
+
+        if sys.version_info < (3, 13):
+            import warnings
+
+            warnings.warn(
+                "to_dask() is deprecated; use to_xarray() instead.",
+                category=FutureWarning,
+                stacklevel=2,
+            )
         return self.to_xarray(*args, **kwargs)

@@ -4,6 +4,8 @@ SPDX-License-Identifier: Apache-2.0
 """
 
 import os
+import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -183,3 +185,14 @@ def _intake_cat_filename(store_path: Path | str) -> str:
 
     store_path_obj = Path(store_path)
     return f"_intake_{store_path_obj.stem}.json"
+
+
+def get_warn_decorator() -> Callable:
+    if sys.version_info >= (3, 13):
+        import warnings
+
+        return warnings.deprecated
+    else:
+        import typing_extensions
+
+        return typing_extensions.deprecated
