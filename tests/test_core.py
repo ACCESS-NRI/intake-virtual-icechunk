@@ -4,6 +4,7 @@
 import json
 
 import pytest
+import xarray as xr
 
 from intake_virtual_icechunk.cat import VirtualIcechunkCatalogModel
 from intake_virtual_icechunk.core import IcechunkCatalog
@@ -217,3 +218,27 @@ class TestIcechunkCatalogDf:
         result = cat.search(source_id="BCC-ESM1")
         df = result.df
         assert all(df["source_id"] == "BCC-ESM1")
+
+
+class TestIcechunkCatalogToXarray:
+    """
+    This class has *not* been human audited.
+    """
+
+    def test_to_xarray_returns_dataset(self, icechunk_store_path):
+        cat = IcechunkCatalog(store=icechunk_store_path)
+        ds = cat.search(filename="ocean.nc").to_dask()
+        assert isinstance(ds, xr.Dataset)
+
+    def test_to_xarray_raises_on_missing_key(self, icechunk_store_path):
+        cat = IcechunkCatalog(store=icechunk_store_path)
+        with pytest.raises(KeyError):
+            cat["NONEXISTENT.KEY"].to_xarray()
+
+    def test_to_dask_warns(self, icechunk_store_path):
+        cat = IcechunkCatalog(store=icechunk_store_path)
+        with pytest.warns(
+            FutureWarning,
+            match=r"to_dask\(\) is deprecated; use to_xarray\(\) instead\.",
+        ):
+            ds = cat.search(filename="ocean.nc").to_dask()
