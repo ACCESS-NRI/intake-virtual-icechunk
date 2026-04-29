@@ -262,7 +262,31 @@ class TestIcechunkCatalog:
     def test_nunique(self, icechunk_store_path):
         cat = IcechunkCatalog(store=icechunk_store_path)
         uniques = cat.nunique()
-        breakpoint()
+        pd.testing.assert_series_equal(
+            uniques,
+            pd.Series(
+                {
+                    "Variable": 7,
+                    "Coordinates": 10,
+                    "Dimensions": 9,
+                    "filename": 5,
+                    "title": 2,
+                    "grid_type": 2,
+                    "grid_tile": 2,
+                    "history": 6,
+                    "NCO": 1,
+                    "file_id": 6,
+                    "temporal_label": 2,
+                    "contents": 2,
+                    "source": 2,
+                    "comment": 2,
+                    "comment2": 2,
+                    "comment3": 2,
+                    "conventions": 2,
+                    "io_flavor": 2,
+                }
+            ),
+        )
 
 
 @pytest.mark.parametrize(
