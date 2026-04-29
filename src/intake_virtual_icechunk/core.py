@@ -9,6 +9,7 @@ from functools import cached_property
 from pathlib import Path
 
 import pandas as pd
+import polars as pl
 import zarr
 from intake.catalog import Catalog
 
@@ -283,9 +284,7 @@ class IcechunkCatalog(Catalog):
         Generate a pretty representation of the catalog for display in Jupyter notebooks.
         """
 
-        # uniques = pd.DataFrame(self.nunique(), columns=["unique"])
-        # text = uniques._repr_html_()
-        text = ""
+        text = pd.DataFrame(self.nunique())._repr_html_()
 
         return f"<p><strong>{self._id or ''} catalog with {len(self)} dataset(s) from {len(self.df)} asset(s)</strong>:</p> {text}"
 
@@ -388,6 +387,22 @@ class IcechunkCatalog(Catalog):
         ]
         return IcechunkCatalog._from_parent(self, matched)
 
+    def nunique(self) -> pd.Series:
+        """
+        Get the number of unique values for each column in the catalog DataFrame.
+        Coverts to polars to handle this because why not. Pandas sucks
+        """
+        pl_df = pl.from_pandas(self.df)
+
+        return pd.Series(
+            {
+                colname: pl_df.get_column(colname).explode().n_unique()
+                if pl_df.schema[colname] == pl.List
+                else pl_df.get_column(colname).n_unique()
+                for colname in pl_df.columns
+            }
+        )
+
     @cached_property
     def df(self) -> pd.DataFrame:
         """
@@ -423,6 +438,11 @@ class IcechunkCatalog(Catalog):
             row.update(attrs)
 
             records.append(row)
+            # Finally, convert all list columns to tuples
+            records = [
+                {k: tuple(v) if isinstance(v, list) else v for k, v in r.items()}
+                for r in records
+            ]
         return pd.DataFrame(records).set_index("key", drop=True)
 
     def to_dataset_dict(
