@@ -3,11 +3,13 @@
 
 import json
 
+import pandas as pd
+import polars as pl
 import pytest
 import xarray as xr
 
 from intake_virtual_icechunk.cat import VirtualIcechunkCatalogModel
-from intake_virtual_icechunk.core import IcechunkCatalog
+from intake_virtual_icechunk.core import IcechunkCatalog, _nunique
 from intake_virtual_icechunk.source._containers import VirtualChunkContainerModel
 from intake_virtual_icechunk.utils import _intake_cat_filename
 
@@ -261,3 +263,25 @@ class TestIcechunkCatalog:
         cat = IcechunkCatalog(store=icechunk_store_path)
         uniques = cat.nunique()
         breakpoint()
+
+
+@pytest.mark.parametrize(
+    "dataframe, expected",
+    [
+        (
+            pd.DataFrame({"a": [1, 2, 2], "b": [[1, 2], [2, 3], [1, 2]]}),
+            pd.Series({"a": 2, "b": 3}),
+        ),
+        (
+            pd.DataFrame({"a": [1, 1, 1], "b": [[1], [1], [1]]}),
+            pd.Series({"a": 1, "b": 1}),
+        ),
+        (
+            pd.DataFrame({"a": [1, 2, 3], "b": [[1], [2], [3]]}),
+            pd.Series({"a": 3, "b": 3}),
+        ),
+    ],
+)
+def test__nunique(dataframe, expected):
+    result = _nunique(pl.from_pandas(dataframe))
+    pd.testing.assert_series_equal(result, expected)
