@@ -387,7 +387,6 @@ class IcechunkCatalog(Catalog):
             row.update({"Coordinates": list(_df.coords)})
             row.update({"Dimensions": list(_df.dims)})
 
-            breakpoint()
             keys = [k.lower() for k in row.keys()]
             attrs = {
                 k: v
@@ -398,11 +397,7 @@ class IcechunkCatalog(Catalog):
             row.update(attrs)
 
             records.append(row)
-        return (
-            # MinimalExploder(pl.DataFrame(records))()
-            # .to_pandas()
-            pd.DataFrame(records).set_index("key", drop=True)
-        )
+        return pd.DataFrame(records).set_index("key", drop=True)
 
     def to_dataset_dict(
         self,
