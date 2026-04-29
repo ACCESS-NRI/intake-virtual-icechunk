@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from functools import cached_property
 from pathlib import Path
 
@@ -13,7 +14,15 @@ from intake.catalog import Catalog
 
 from intake_virtual_icechunk._source import IcechunkDataSource
 from intake_virtual_icechunk.source._containers import VirtualChunkContainerModel
-from intake_virtual_icechunk.utils import _intake_cat_filename, _resolve_storage
+from intake_virtual_icechunk.utils import (
+    _intake_cat_filename,
+    _resolve_storage,
+)
+
+if sys.version_info >= (3, 13):
+    from warnings import deprecated
+else:
+    from typing_extensions import deprecated
 
 
 def _match_query(attrs: dict, query: dict) -> bool:
@@ -66,7 +75,7 @@ class IcechunkCatalog(Catalog):
     >>> cat = intake.open_virtual_icechunk('/path/to/store')
     >>> cat.keys()
     ['CMIP.BCC.BCC-ESM1.historical', 'CMIP.BCC.BCC-ESM1.ssp585']
-    >>> ds = cat['CMIP.BCC.BCC-ESM1.historical'].to_dask()
+    >>> ds = cat['CMIP.BCC.BCC-ESM1.historical'].to_xarray()
 
     Or load from a JSON sidecar:
 
@@ -324,7 +333,7 @@ class IcechunkCatalog(Catalog):
             "search",
             "df",
             "to_dataset_dict",
-            "to_dask",
+            "to_xarray",
         ]
         return sorted(list(self.__dict__.keys()) + rv)
 
@@ -443,10 +452,10 @@ class IcechunkCatalog(Catalog):
                 storage_options=self.storage_options,
                 xarray_kwargs=merged_kwargs,
             )
-            result[key] = source.to_dask()
+            result[key] = source.to_xarray()
         return result
 
-    def to_dask(self, **kwargs):
+    def to_xarray(self, **kwargs):
         """
         Return the catalog as a single xarray Dataset.
 
@@ -468,9 +477,23 @@ class IcechunkCatalog(Catalog):
         """
         if len(self) != 1:
             raise ValueError(
-                f"to_dask() requires exactly one catalog entry, but this catalog has {len(self)}. "
+                f"to_xarray() requires exactly one catalog entry, but this catalog has {len(self)}. "
                 "Use to_dataset_dict() instead."
             )
         res = self.to_dataset_dict(**{**kwargs, "progressbar": False})
         _, ds = res.popitem()
         return ds
+
+    @deprecated(
+        "to_dask() is deprecated; use to_xarray() instead.", category=FutureWarning
+    )
+    def to_dask(self, *args, **kwargs):
+        if sys.version_info < (3, 13):
+            import warnings
+
+            warnings.warn(
+                "to_dask() is deprecated; use to_xarray() instead.",
+                category=FutureWarning,
+                stacklevel=2,
+            )
+        return self.to_xarray(*args, **kwargs)

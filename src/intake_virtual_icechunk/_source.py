@@ -105,13 +105,10 @@ class IcechunkDataSource(DataSource):
                 f"Failed to load dataset with key='{self.key}' from store '{self.store}'"
             ) from exc
 
-    def to_dask(self) -> xr.Dataset:
+    def to_xarray(self) -> xr.Dataset:
         """Return the xarray Dataset (with dask-backed arrays)."""
         self._load_metadata()
         return self.ds
-
-    def _get_partition(self, i: int) -> xr.Dataset:
-        return self.to_dask()
 
     def close(self) -> None:
         """Drop the open dataset from memory."""
