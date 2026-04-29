@@ -405,12 +405,14 @@ class IcechunkCatalog(Catalog):
         :class:`~intake_virtual_icechunk._build.IcechunkStoreBuilder`.
         """
         records = []
+        metadata_xarray_kwargs = {**self.xarray_kwargs, "decode_times": False}
         for key in self.keys():
             _df = IcechunkDataSource(
                 key=key,
                 store=self._zarr_store,
                 group=key,
                 storage_options=self.storage_options,
+                xarray_kwargs=metadata_xarray_kwargs,
             ).to_xarray()
             row: dict = {"key": key}
             row.update(
