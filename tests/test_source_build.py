@@ -296,7 +296,7 @@ class TestIcechunkStoreBuilder:
             local_om2_datastore_path,
             intake_esm_kwargs,
             dummy_store_path,
-            cols_to_deiter=["start_date"],
+            cols_to_deiter=["start_date", "variable_standard_name"],
         )
 
         builder.build()
@@ -306,4 +306,10 @@ class TestIcechunkStoreBuilder:
 
         assert "start_date" in cat.df.columns
 
-        assert cat.df.loc["ocean.fx.xt_ocean:1.yt_ocean:1.point"].start_date is None
+        # Stupid sentinel value quirk
+        assert cat.df.loc["ocean.fx.xt_ocean:1.yt_ocean:1.point"].start_date == "none"
+        # Nothing in here for this dataset
+        assert (
+            cat.df.loc["ocean.fx.xt_ocean:1.yt_ocean:1.point"].variable_standard_name
+            is None
+        )
