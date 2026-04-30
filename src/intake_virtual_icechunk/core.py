@@ -7,6 +7,7 @@ import json
 import sys
 from functools import cached_property
 from pathlib import Path
+from uuid import uuid4
 
 import pandas as pd
 import polars as pl
@@ -15,6 +16,11 @@ from intake.catalog import Catalog
 
 from intake_virtual_icechunk._source import IcechunkDataSource
 from intake_virtual_icechunk.source._containers import VirtualChunkContainerModel
+from intake_virtual_icechunk.telemetry import (
+    TelemetryContext,
+    TelemetryEmitter,
+    emit_telemetry,
+)
 from intake_virtual_icechunk.utils import (
     _intake_cat_filename,
     _resolve_storage,
@@ -93,6 +99,8 @@ class IcechunkCatalog(Catalog):
         storage_options=None,
         xarray_kwargs=None,
         virtual_chunk_model=None,
+        telemetry_context: TelemetryContext | None = None,
+        telemetry_emitter: TelemetryEmitter | None = None,
         **intake_kwargs,
     ):
         super().__init__(**intake_kwargs)
@@ -117,6 +125,9 @@ class IcechunkCatalog(Catalog):
         self.virtual_chunk_container = (
             self.virtual_chunk_model.to_virtual_chunk_container()
         )
+
+        self.telemetry_context = telemetry_context or TelemetryContext(store_id=self.store)
+        self.telemetry_emitter = telemetry_emitter
 
         self._entries: dict[str, IcechunkDataSource] = {}
         self._allowed_keys: list[str] | None = (
@@ -178,6 +189,8 @@ class IcechunkCatalog(Catalog):
             storage_options=parent.storage_options,
             xarray_kwargs=parent.xarray_kwargs,
             virtual_chunk_model=parent.virtual_chunk_model,
+            telemetry_context=parent.telemetry_context,
+            telemetry_emitter=parent.telemetry_emitter,
         )
         # Share the already-opened backend so we don't re-open the repo.
         cat._open_repo = parent._open_repo
@@ -325,6 +338,8 @@ class IcechunkCatalog(Catalog):
                 group=key,
                 storage_options=self.storage_options,
                 xarray_kwargs=self.xarray_kwargs,
+                telemetry_context=self.telemetry_context.with_updates(selection={"key": key}),
+                telemetry_emitter=self.telemetry_emitter,
             )
         return self._entries[key]
 
@@ -385,7 +400,21 @@ class IcechunkCatalog(Catalog):
             for key in self.keys()
             if _match_query(dict(self._root_group[key].attrs), query)
         ]
-        return IcechunkCatalog._from_parent(self, matched)
+        context = self.telemetry_context.with_updates(
+            search_id=uuid4().hex,
+            search_params=dict(query),
+            search_result_count=len(matched),
+            selection=None,
+        )
+        emit_telemetry(
+            self.telemetry_emitter,
+            "catalog.search",
+            context,
+            {"query": dict(query), "result_count": len(matched)},
+        )
+        result = IcechunkCatalog._from_parent(self, matched)
+        result.telemetry_context = context
+        return result
 
     def nunique(self) -> pd.Series:
         """
@@ -412,6 +441,8 @@ class IcechunkCatalog(Catalog):
                 group=key,
                 storage_options=self.storage_options,
                 xarray_kwargs=self.xarray_kwargs,
+                telemetry_context=self.telemetry_context.with_updates(selection={"key": key}),
+                telemetry_emitter=self.telemetry_emitter,
             ).to_xarray()
             row: dict = {"key": key}
             row.update(
@@ -478,6 +509,8 @@ class IcechunkCatalog(Catalog):
                 group=key,
                 storage_options=self.storage_options,
                 xarray_kwargs=merged_kwargs,
+                telemetry_context=self.telemetry_context.with_updates(selection={"key": key}),
+                telemetry_emitter=self.telemetry_emitter,
             )
             result[key] = source.to_xarray()
         return result

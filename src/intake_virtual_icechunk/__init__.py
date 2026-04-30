@@ -5,10 +5,12 @@ from importlib.metadata import version
 
 from .cat import VirtualIcechunkCatalogModel
 from .core import IcechunkCatalog
+from .telemetry import TelemetryContext
 
 __version__ = version("intake_virtual_icechunk")
 
 __all__ = [
     "IcechunkCatalog",
+    "TelemetryContext",
     "VirtualIcechunkCatalogModel",
 ]
