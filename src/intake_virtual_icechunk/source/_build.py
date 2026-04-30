@@ -357,7 +357,9 @@ class IcechunkStoreBuilder:
                         # Write group metadata into .zattrs so the catalog can search
                         # these groups without opening the arrays.
                         zarr_group = zarr.open_group(store, path=public_key, mode="a")
-                        self._attach_catalog_metadata(zarr_group, group_df, group_attrs)
+                        self._attach_catalog_metadata(
+                            zarr_group, group_df.drop(columns=_drop_cols), group_attrs
+                        )
 
                         print(f"Virtualised group {public_key} successfully!")
 

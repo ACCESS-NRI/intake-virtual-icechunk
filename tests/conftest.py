@@ -87,7 +87,7 @@ def icechunk_store_path(esm_datastore_path, tmp_path_factory) -> Path:
         store_path=cat_path,
         drop_cols=[
             "filename",
-            "path",
+            # "path", # This should be droppped automatically...
             "start_date",
             "end_date",
             "file_id",
