@@ -3,7 +3,13 @@
 
 from pathlib import Path
 
+from dask.distributed import Client
+
+client = Client(threads_per_worker=1)
+
 import pytest
+
+from intake_virtual_icechunk.source import IcechunkStoreBuilder
 
 
 @pytest.fixture(scope="session")
@@ -41,12 +47,32 @@ def groups():
     ]
 
 
-@pytest.fixture
-def icechunk_store_path(sample_data) -> Path:
+@pytest.fixture(scope="session")
+def icechunk_store_path(sample_data, tmp_path_factory) -> Path:
     """
-    Use a minimal icechunk store for testing. This is
+    Use a minimal icechunk store for testing. This needs to be rebuilt at the
+    start of each test session, or virtualizarr will complain about manifests not
+    being up to date.
     """
-    return sample_data / "access-om2" / "icecat.icechunk"
+    cat_path = tmp_path_factory.mktemp("access-om2") / "icecat.icechunk"
+    esmcat_path = sample_data / "access-om2" / "esmcat" / "access-om2.json"
+
+    iscb = IcechunkStoreBuilder(
+        esm_datastore_path=esmcat_path,
+        store_path=cat_path,
+        drop_cols=[
+            "filename",
+            "path",
+            "start_date",
+            "end_date",
+            "file_id",
+            "temporal_label",
+        ],
+    )
+
+    iscb.build()
+
+    return cat_path
 
 
 @pytest.fixture
