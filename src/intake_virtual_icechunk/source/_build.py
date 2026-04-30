@@ -334,9 +334,7 @@ class IcechunkStoreBuilder:
                     zarr_group = zarr.open_group(store, path=public_key, mode="a")
                     # Would make more sense to merge group_attrs and esm_ds_metadata
                     # first in a sensible way
-                    self._attach_catalog_metadata(
-                        zarr_group, group_df.drop(columns=_drop_cols), group_attrs
-                    )
+                    self._attach_catalog_metadata(zarr_group, group_df, group_attrs)
 
                     print(f"Virtualised group {public_key} successfully!")
                 except Exception as e:
@@ -357,9 +355,7 @@ class IcechunkStoreBuilder:
                         # Write group metadata into .zattrs so the catalog can search
                         # these groups without opening the arrays.
                         zarr_group = zarr.open_group(store, path=public_key, mode="a")
-                        self._attach_catalog_metadata(
-                            zarr_group, group_df.drop(columns=_drop_cols), group_attrs
-                        )
+                        self._attach_catalog_metadata(zarr_group, group_df, group_attrs)
 
                         print(f"Virtualised group {public_key} successfully!")
 
@@ -398,6 +394,8 @@ class IcechunkStoreBuilder:
         For now, we'll just attach the groupby_attrs, but we could also consider attaching
         other metadata from the catalog if needed.
         """
+
+        group_df = group_df.drop(columns=self.drop_cols, errors="ignore")
 
         exploded_metadata: Mapping[str, list[Any] | None] = (
             MinimalExploder(pl.from_pandas(group_df))()
