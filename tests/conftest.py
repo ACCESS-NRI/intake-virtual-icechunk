@@ -48,17 +48,45 @@ def groups():
 
 
 @pytest.fixture(scope="session")
-def icechunk_store_path(sample_data, tmp_path_factory) -> Path:
+def esm_datastore_path(sample_data, tmp_path_factory) -> Path:
+    """
+    Before building an icechunk store, we need an esm_datastore to build from!
+    This is a minimal fixture to do that.
+    """
+
+    from access_nri_intake.experiment import use_datastore
+    from access_nri_intake.source.builders import AccessOm2Builder
+
+    data_root = sample_data / "access-om2"
+
+    # catalog_dir = sample_data / "access-om2" / "esmcat"
+    # esmcat_path = tmp_path_factory.mktemp("access-om2") / "icecat.icechunk"
+
+    catalog_dir = tmp_path_factory.mktemp("access-om2") / "esmcat"
+    catalog_dir.mkdir(parents=True, exist_ok=True)
+
+    use_datastore(
+        experiment_dir=data_root,
+        builder=AccessOm2Builder,
+        catalog_dir=catalog_dir,
+        open_ds=True,
+        datastore_name="access-om2",
+    )
+    return sample_data / "access-om2" / "esmcat" / "access-om2.json"
+
+
+@pytest.fixture(scope="session")
+def icechunk_store_path(sample_data, esm_datastore_path, tmp_path_factory) -> Path:
     """
     Use a minimal icechunk store for testing. This needs to be rebuilt at the
     start of each test session, or virtualizarr will complain about manifests not
     being up to date.
     """
     cat_path = tmp_path_factory.mktemp("access-om2") / "icecat.icechunk"
-    esmcat_path = sample_data / "access-om2" / "esmcat" / "access-om2.json"
+    # esmcat_path = sample_data / "access-om2" / "esmcat" / "access-om2.json"
 
     iscb = IcechunkStoreBuilder(
-        esm_datastore_path=esmcat_path,
+        esm_datastore_path=esm_datastore_path,
         store_path=cat_path,
         drop_cols=[
             "filename",
