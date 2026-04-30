@@ -76,7 +76,9 @@ class TestIcechunkStoreBuilder:
         """
         dummy_store_path = tmpdir / "dummy_store.icechunk"
         builder = IcechunkStoreBuilder(
-            local_om2_datastore_path, intake_esm_kwargs, dummy_store_path
+            esm_datastore_path=local_om2_datastore_path,
+            store_path=dummy_store_path,
+            esm_datastore_kwargs=intake_esm_kwargs,
         )
 
         assert isinstance(builder.parser, virtualizarr.parsers.hdf.hdf.HDFParser)
@@ -92,7 +94,10 @@ class TestIcechunkStoreBuilder:
         dummy_store_path = tmpdir / "dummy_store.icechunk"
         parser = virtualizarr.parsers.hdf.hdf.HDFParser
         builder = IcechunkStoreBuilder(
-            local_om2_datastore_path, intake_esm_kwargs, dummy_store_path, parser=parser
+            esm_datastore_path=local_om2_datastore_path,
+            esm_datastore_kwargs=intake_esm_kwargs,
+            store_path=dummy_store_path,
+            parser=parser,
         )
 
         assert builder._esm_ds is None
@@ -119,7 +124,9 @@ class TestIcechunkStoreBuilder:
 
         dummy_store_path = tmpdir / "dummy_store.icechunk"
         builder = IcechunkStoreBuilder(
-            local_om2_datastore_path, intake_esm_kwargs, dummy_store_path
+            esm_datastore_path=local_om2_datastore_path,
+            esm_datastore_kwargs=intake_esm_kwargs,
+            store_path=dummy_store_path,
         )
         from intake_esm.cat import DataFormat
 
@@ -136,7 +143,9 @@ class TestIcechunkStoreBuilder:
         """
         dummy_store_path = tmpdir / "dummy_store.icechunk"
         builder = IcechunkStoreBuilder(
-            local_om2_datastore_path, intake_esm_kwargs, dummy_store_path
+            esm_datastore_path=local_om2_datastore_path,
+            esm_datastore_kwargs=intake_esm_kwargs,
+            store_path=dummy_store_path,
         )
 
         builder.build()
@@ -159,9 +168,9 @@ class TestIcechunkStoreBuilder:
         """
         dummy_store_path = tmpdir / "dummy_store.icechunk"
         builder = IcechunkStoreBuilder(
-            local_om2_datastore_path,
-            intake_esm_kwargs,
-            dummy_store_path,
+            esm_datastore_path=local_om2_datastore_path,
+            store_path=dummy_store_path,
+            esm_datastore_kwargs=intake_esm_kwargs,
             parser=virtualizarr.parsers.ZarrParser,
         )
         with pytest.raises(
@@ -188,9 +197,9 @@ class TestIcechunkStoreBuilder:
         """
         dummy_store_path = tmpdir / "dummy_store.icechunk"
         builder = IcechunkStoreBuilder(
-            local_om2_datastore_path,
-            intake_esm_kwargs,
-            dummy_store_path,
+            esm_datastore_path=local_om2_datastore_path,
+            store_path=dummy_store_path,
+            esm_datastore_kwargs=intake_esm_kwargs,
         )
 
         with pytest.raises(
@@ -223,9 +232,9 @@ class TestIcechunkStoreBuilder:
         """
         dummy_store_path = tmpdir / "dummy_store.icechunk"
         builder = IcechunkStoreBuilder(
-            local_om2_datastore_path,
-            intake_esm_kwargs,
-            dummy_store_path,
+            esm_datastore_path=local_om2_datastore_path,
+            store_path=dummy_store_path,
+            esm_datastore_kwargs=intake_esm_kwargs,
         )
 
         with pytest.raises(
@@ -246,9 +255,9 @@ class TestIcechunkStoreBuilder:
 
         dummy_store_path_2 = tmpdir / "dummy_store2.icechunk"
         builder_2 = IcechunkStoreBuilder(
-            local_om2_datastore_path,
-            intake_esm_kwargs,
-            dummy_store_path_2,
+            esm_datastore_path=local_om2_datastore_path,
+            esm_datastore_kwargs=intake_esm_kwargs,
+            store_path=dummy_store_path_2,
         )
 
         with patch(
@@ -270,9 +279,9 @@ class TestIcechunkStoreBuilder:
         """
         dummy_store_path = tmpdir / "dummy_store.icechunk"
         builder = IcechunkStoreBuilder(
-            local_om2_datastore_path,
-            intake_esm_kwargs,
-            dummy_store_path,
+            esm_datastore_path=local_om2_datastore_path,
+            store_path=dummy_store_path,
+            esm_datastore_kwargs=intake_esm_kwargs,
             cols_to_deiter=["variable_cell_methods"],
         )
 
@@ -293,9 +302,9 @@ class TestIcechunkStoreBuilder:
         """
         dummy_store_path = tmpdir / "dummy_store.icechunk"
         builder = IcechunkStoreBuilder(
-            local_om2_datastore_path,
-            intake_esm_kwargs,
-            dummy_store_path,
+            esm_datastore_path=local_om2_datastore_path,
+            esm_datastore_kwargs=intake_esm_kwargs,
+            store_path=dummy_store_path,
             cols_to_deiter=["start_date", "variable_standard_name"],
         )
 

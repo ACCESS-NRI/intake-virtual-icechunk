@@ -118,9 +118,10 @@ class IcechunkStoreBuilder:
 
     def __init__(
         self,
+        *,
         esm_datastore_path: Path | str,
-        esm_datastore_kwargs: dict | None,
         store_path: Path | str,
+        esm_datastore_kwargs: dict | None = None,
         parser: VirtualizarrParser | None = None,
         storage_options: dict | None = None,
         store_options: dict | None = None,
