@@ -3,9 +3,11 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 from typing import Any
+from urllib import request
 from uuid import uuid4
 
 
@@ -58,3 +60,33 @@ def emit_telemetry(
     if emitter is None:
         return
     emitter(event, context, payload)
+
+
+def create_demo_http_emitter(
+    url: str,
+    *,
+    timeout: float = 5.0,
+    headers: Mapping[str, str] | None = None,
+) -> TelemetryEmitter:
+    """Return a demo emitter that POSTs telemetry events to an HTTP endpoint."""
+
+    request_headers = {"content-type": "application/json"}
+    request_headers.update(headers or {})
+
+    def _emit(
+        event: str,
+        context: TelemetryContext,
+        payload: Mapping[str, Any] | None,
+    ) -> None:
+        body = json.dumps(
+            {
+                "event": event,
+                "context": asdict(context),
+                "payload": dict(payload) if payload is not None else None,
+            }
+        ).encode("utf-8")
+        req = request.Request(url, data=body, headers=request_headers, method="POST")
+        with request.urlopen(req, timeout=timeout):
+            pass
+
+    return _emit
