@@ -215,7 +215,7 @@ class TestIcechunkCatalogSearch:
             c
             for c in df.columns
             if c not in cat.columns_with_iterables
-            and not df[c].apply(lambda x: isinstance(x, (list, tuple))).any()
+            and not df[c].apply(lambda x: isinstance(x, (list | tuple))).any()
         ]
         if len(scalar_cols) < 2:
             pytest.skip("Need at least 2 scalar columns for multi-attr test")
@@ -236,7 +236,7 @@ class TestIcechunkCatalogSearch:
             c
             for c in df.columns
             if c not in cat.columns_with_iterables
-            and not df[c].apply(lambda x: isinstance(x, (list, tuple))).any()
+            and not df[c].apply(lambda x: isinstance(x, (list | tuple))).any()
         ]
         if len(scalar_cols) < 2:
             pytest.skip("Need at least 2 scalar columns for multi-attr test")

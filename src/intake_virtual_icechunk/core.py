@@ -13,6 +13,7 @@ import polars as pl
 import zarr
 from intake.catalog import Catalog
 
+from intake_virtual_icechunk._search import pl_search
 from intake_virtual_icechunk._source import IcechunkDataSource
 from intake_virtual_icechunk.source._containers import VirtualChunkContainerModel
 from intake_virtual_icechunk.utils import (
@@ -355,12 +356,21 @@ class IcechunkCatalog(Catalog):
     # Search and metadata
     # ------------------------------------------------------------------
 
-    def search(self, **query) -> IcechunkCatalog:
+    def search(
+        self,
+        # require_all_on: str | list[str] | None = None,
+        **query,
+    ) -> IcechunkCatalog:
         """
         Search for entries in the catalog by matching group ``.zattrs``.
 
         Parameters
         ----------
+        require_all_on : str or list of str, optional
+            If specified, the given column(s) must match *all* values in the query.
+            Mostly for back compatibility with intake-esm, although I don't really
+            understand it & I'm not sure it should be kept
+
         **query
             Each keyword maps to a ``.zattrs`` attribute name.  The value
             may be a scalar or a list of allowed values.
@@ -380,12 +390,27 @@ class IcechunkCatalog(Catalog):
         if not query:
             return self
 
+        colnames = set(self.df.columns)
+        if not any(key in colnames for key in query.keys()):
+            return IcechunkCatalog._from_parent(self, [])
+
         matched = [
             key
             for key in self.keys()
             if _match_query(dict(self._root_group[key].attrs), query)
         ]
         return IcechunkCatalog._from_parent(self, matched)
+
+        lf = pl.from_pandas(self.df.reset_index()).lazy()
+        normalized_query = {
+            k: v if isinstance(v, list) else [v] for k, v in query.items()
+        }
+        results = pl_search(
+            lf=lf,
+            query=normalized_query,
+            columns_with_iterables=self.columns_with_iterables,
+        )
+        return IcechunkCatalog._from_parent(self, results["key"].tolist())
 
     def nunique(self) -> pd.Series:
         """
@@ -436,6 +461,19 @@ class IcechunkCatalog(Catalog):
                 for r in records
             ]
         return pd.DataFrame(records).set_index("key", drop=True)
+
+    @cached_property
+    def columns_with_iterables(self) -> set[str]:
+        """
+        Return a set of column names that contain iterable values (e.g. lists).
+
+        This is needed to know which columns to unpack when doing searches with
+        iterable query values.
+        """
+        pl_df = pl.from_pandas(self.df.head(1))
+
+        colnames, dtypes = pl_df.columns, pl_df.dtypes
+        return {colname for colname, dtype in zip(colnames, dtypes) if dtype == pl.List}
 
     def to_dataset_dict(
         self,
