@@ -109,9 +109,9 @@ class IcechunkCatalog(Catalog):
             self.storage_options = storage_options or metadata.get(
                 "storage_options", {}
             )
-            self.xarray_kwargs = storage_options or metadata.get("xarray_kwargs", {})
+            self.xarray_kwargs = xarray_kwargs or metadata.get("xarray_kwargs", {})
             self.virtual_chunk_model = VirtualChunkContainerModel.from_dict(
-                storage_options or metadata.get("virtual_chunk_model", {})
+                virtual_chunk_model or metadata.get("virtual_chunk_model", {})
             )
             self._id = metadata.get("id", None)
 
@@ -178,7 +178,7 @@ class IcechunkCatalog(Catalog):
             store=parent.store,
             storage_options=parent.storage_options,
             xarray_kwargs=parent.xarray_kwargs,
-            virtual_chunk_model=parent.virtual_chunk_model,
+            virtual_chunk_model=parent.virtual_chunk_model.to_dict(),
         )
         # Share the already-opened backend so we don't re-open the repo.
         cat._open_repo = parent._open_repo
@@ -218,7 +218,7 @@ class IcechunkCatalog(Catalog):
             store=model.store,
             storage_options=model.storage_options,
             xarray_kwargs=xarray_kwargs or {},
-            virtual_chunk_model=model.virtual_chunk_model,
+            virtual_chunk_model=model.virtual_chunk_model.to_dict(),
         )
 
     # ------------------------------------------------------------------
