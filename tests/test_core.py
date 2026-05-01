@@ -160,6 +160,25 @@ class TestIcechunkCatalogFromJson:
         cat = IcechunkCatalog.from_json(temp_json_local_path)
         assert cat.store == str(icechunk_store_path)
 
+    def test_from_json_preserves_catalog_id(
+        self, tmp_path, icechunk_store_path, sample_data
+    ):
+        """Regression: from_json() must not drop the catalog id stored in the JSON."""
+        sidecar = {
+            "id": "my-cat",
+            "store": str(icechunk_store_path),
+            "storage_options": {},
+            "virtual_chunk_model": {
+                "url_prefix": f"file://{sample_data}/access-om2/",
+                "store_type": "PyObjectStoreConfig_LocalFileSystem",
+                "open_kwargs": {},
+            },
+        }
+        json_path = tmp_path / "my-cat.json"
+        json_path.write_text(json.dumps(sidecar))
+        cat = IcechunkCatalog.from_json(str(json_path))
+        assert cat._id == "my-cat"
+
     def test_save_round_trip(self, tmp_path, icechunk_store_path):
         cat = IcechunkCatalog(store=icechunk_store_path)
         cat.save("saved-cat", directory=str(tmp_path))

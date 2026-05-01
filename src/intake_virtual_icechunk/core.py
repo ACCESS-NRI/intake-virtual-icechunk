@@ -125,6 +125,7 @@ class IcechunkCatalog(Catalog):
         sidecar_options=None,
         xarray_kwargs=None,
         virtual_chunk_model=None,
+        catalog_id=None,
         **intake_kwargs,
     ):
         super().__init__(**intake_kwargs)
@@ -155,7 +156,7 @@ class IcechunkCatalog(Catalog):
             self.virtual_chunk_model = VirtualChunkContainerModel.from_dict(
                 virtual_chunk_model
             )
-            self._id = None
+            self._id = catalog_id or None
 
         self.virtual_chunk_container = (
             self.virtual_chunk_model.to_virtual_chunk_container()
@@ -264,6 +265,7 @@ class IcechunkCatalog(Catalog):
             storage_options=model.storage_options,
             xarray_kwargs=xarray_kwargs or {},
             virtual_chunk_model=model.virtual_chunk_model.to_dict(),
+            catalog_id=model.id or None,
         )
 
     # ------------------------------------------------------------------
