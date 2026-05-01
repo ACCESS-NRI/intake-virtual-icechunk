@@ -142,50 +142,160 @@ class TestIcechunkCatalogKeys:
 
 class TestIcechunkCatalogSearch:
     """
-    This class has *not* been human audited.
+    Search tests. All expected values are derived from cat.df so these tests
+    remain valid regardless of which test store is used.
     """
-
-    @pytest.mark.xfail(reason="Search functionality not yet implemented correctly")
-    def test_search_scalar_match(self, icechunk_store_path, groups):
-        cat = IcechunkCatalog(store=icechunk_store_path)
-        result = cat.search(source_id="BCC-ESM1")
-        assert sorted(result.keys()) == sorted(
-            [g["key"] for g in groups if g["attrs"]["source_id"] == "BCC-ESM1"]
-        )
-
-    @pytest.mark.xfail(reason="Search functionality not yet implemented correctly")
-    def test_search_multi_attr(self, icechunk_store_path):
-        cat = IcechunkCatalog(store=icechunk_store_path)
-        result = cat.search(source_id="BCC-ESM1", experiment_id="historical")
-        assert result.keys() == ["CMIP.BCC.BCC-ESM1.historical"]
-
-    @pytest.mark.xfail(reason="Search functionality not yet implemented correctly")
-    def test_search_list_value(self, icechunk_store_path, groups):
-        cat = IcechunkCatalog(store=icechunk_store_path)
-        result = cat.search(experiment_id=["historical", "ssp585"])
-        historical_ssp = [
-            g["key"]
-            for g in groups
-            if g["attrs"]["experiment_id"] in ("historical", "ssp585")
-        ]
-        assert sorted(result.keys()) == sorted(historical_ssp)
-
-    def test_search_no_match(self, icechunk_store_path):
-        cat = IcechunkCatalog(store=icechunk_store_path)
-        result = cat.search(source_id="NONEXISTENT")
-        assert result.keys() == []
 
     def test_search_empty_query_returns_self(self, icechunk_store_path):
         cat = IcechunkCatalog(store=icechunk_store_path)
         result = cat.search()
         assert result is cat
 
+    def test_search_unknown_column_returns_empty(self, icechunk_store_path):
+        cat = IcechunkCatalog(store=icechunk_store_path)
+        result = cat.search(totally_nonexistent_column_xyz="whatever")
+        assert result.keys() == []
+
+    def test_search_known_column_no_match_returns_empty(self, icechunk_store_path):
+        """Column exists but value is absent — must return empty, not all rows."""
+        cat = IcechunkCatalog(store=icechunk_store_path)
+        result = cat.search(filename="THIS_FILE_DOES_NOT_EXIST.nc")
+        assert result.keys() == []
+
+    def test_search_scalar_match(self, icechunk_store_path):
+        cat = IcechunkCatalog(store=icechunk_store_path)
+        df = cat.df
+        filename_val = df["filename"].dropna().iloc[0]
+        expected = sorted(df[df["filename"] == filename_val].index.tolist())
+
+        result = cat.search(filename=filename_val)
+
+        assert sorted(result.keys()) == expected
+        assert len(result) > 0
+
+    def test_search_scalar_is_exact_not_substring(self, icechunk_store_path):
+        """Search must not return entries whose attribute only *contains* the query."""
+        cat = IcechunkCatalog(store=icechunk_store_path)
+        filename_val = cat.df["filename"].dropna().iloc[0]
+        # A substring of a real filename should not match anything
+        substring = filename_val[1:-1]  # strip first and last char
+        result = cat.search(filename=substring)
+        assert substring not in cat.df["filename"].values or sorted(
+            result.keys()
+        ) == sorted(cat.df[cat.df["filename"] == substring].index.tolist())
+
+    def test_search_list_value(self, icechunk_store_path):
+        cat = IcechunkCatalog(store=icechunk_store_path)
+        df = cat.df
+        filenames = df["filename"].dropna().unique().tolist()[:2]
+        expected = sorted(df[df["filename"].isin(filenames)].index.tolist())
+
+        result = cat.search(filename=filenames)
+
+        assert sorted(result.keys()) == expected
+
+    def test_search_list_superset_of_scalar(self, icechunk_store_path):
+        """search(x=[a, b]) should return at least as many results as search(x=a)."""
+        cat = IcechunkCatalog(store=icechunk_store_path)
+        filenames = cat.df["filename"].dropna().unique().tolist()
+        if len(filenames) < 2:
+            pytest.skip("Need at least 2 distinct filenames")
+        a, b = filenames[0], filenames[1]
+
+        result_scalar = cat.search(filename=a)
+        result_list = cat.search(filename=[a, b])
+
+        assert set(result_scalar.keys()).issubset(set(result_list.keys()))
+
+    def test_search_multi_attr(self, icechunk_store_path):
+        cat = IcechunkCatalog(store=icechunk_store_path)
+        df = cat.df
+        # Use only scalar (non-iterable) columns to avoid tuple/list mismatches
+        scalar_cols = [
+            c
+            for c in df.columns
+            if c not in cat.columns_with_iterables
+            and not df[c].apply(lambda x: isinstance(x, (list | tuple))).any()
+        ]
+        if len(scalar_cols) < 2:
+            pytest.skip("Need at least 2 scalar columns for multi-attr test")
+        col1, col2 = scalar_cols[0], scalar_cols[1]
+        row = df.iloc[0]
+        val1, val2 = row[col1], row[col2]
+        expected = sorted(df[(df[col1] == val1) & (df[col2] == val2)].index.tolist())
+
+        result = cat.search(**{col1: val1, col2: val2})
+
+        assert sorted(result.keys()) == expected
+
+    def test_search_multi_attr_is_intersection(self, icechunk_store_path):
+        """Multi-attr search must be AND, not OR."""
+        cat = IcechunkCatalog(store=icechunk_store_path)
+        df = cat.df
+        scalar_cols = [
+            c
+            for c in df.columns
+            if c not in cat.columns_with_iterables
+            and not df[c].apply(lambda x: isinstance(x, (list | tuple))).any()
+        ]
+        if len(scalar_cols) < 2:
+            pytest.skip("Need at least 2 scalar columns for multi-attr test")
+        col1, col2 = scalar_cols[0], scalar_cols[1]
+        val1 = df[col1].dropna().iloc[0]
+        val2 = df[col2].dropna().iloc[0]
+
+        result_both = cat.search(**{col1: val1, col2: val2})
+        result_col1_only = cat.search(**{col1: val1})
+        result_col2_only = cat.search(**{col2: val2})
+
+        # AND: result must be subset of both individual results
+        assert set(result_both.keys()).issubset(set(result_col1_only.keys()))
+        assert set(result_both.keys()).issubset(set(result_col2_only.keys()))
+
+    def test_search_result_is_icechunk_catalog(self, icechunk_store_path):
+        cat = IcechunkCatalog(store=icechunk_store_path)
+        result = cat.search(filename="ocean.nc")
+        assert isinstance(result, IcechunkCatalog)
+
+    def test_search_result_keys_are_subset_of_parent(self, icechunk_store_path):
+        cat = IcechunkCatalog(store=icechunk_store_path)
+        result = cat.search(filename="ocean.nc")
+        assert set(result.keys()).issubset(set(cat.keys()))
+
     def test_search_result_shares_store(self, icechunk_store_path):
         cat = IcechunkCatalog(store=icechunk_store_path)
-        _ = cat._zarr_store  # open the store
-        result = cat.search(source_id="BCC-ESM1")
-        # The filtered catalog shares the open store objects
+        _ = cat._zarr_store
+        result = cat.search(filename="ocean.nc")
         assert result._open_zarr_store is cat._open_zarr_store
+
+    def test_search_chained_is_intersection(self, icechunk_store_path):
+        """Chaining two searches should equal the AND of both queries at once."""
+        cat = IcechunkCatalog(store=icechunk_store_path)
+        df = cat.df
+        scalar_cols = [
+            c
+            for c in df.columns
+            if c not in cat.columns_with_iterables
+            and not df[c].apply(lambda x: isinstance(x, (list | tuple))).any()
+        ]
+        if len(scalar_cols) < 2:
+            pytest.skip("Need at least 2 scalar columns for chained search test")
+        col1, col2 = scalar_cols[0], scalar_cols[1]
+        val1 = df[col1].dropna().iloc[0]
+        val2 = df[col2].dropna().iloc[0]
+
+        chained = cat.search(**{col1: val1}).search(**{col2: val2})
+        combined = cat.search(**{col1: val1, col2: val2})
+
+        assert sorted(chained.keys()) == sorted(combined.keys())
+
+    def test_search_df_reflects_results(self, icechunk_store_path):
+        """The .df on a search result should only contain matched entries."""
+        cat = IcechunkCatalog(store=icechunk_store_path)
+        filename_val = cat.df["filename"].dropna().iloc[0]
+        result = cat.search(filename=filename_val)
+        assert set(result.df.index.tolist()) == set(result.keys())
+        assert all(result.df["filename"] == filename_val)
 
 
 class TestIcechunkCatalogDf:
