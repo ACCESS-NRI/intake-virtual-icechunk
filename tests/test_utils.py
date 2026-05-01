@@ -38,6 +38,17 @@ class TestSidecarUrl:
         # Must not contain ``://``-style corruption
         assert "://" not in result or result.startswith("file://")
 
+    def test_file_uri(self):
+        # Regression: Path() on POSIX collapses file:///path → file:/path
+        result = _sidecar_url("file:///tmp/demo.icechunk")
+        assert result == "file:///tmp/demo.icechunk/_intake_demo.json", (
+            f"file:// URI mangled: got {result!r}"
+        )
+
+    def test_file_uri_trailing_slash(self):
+        result = _sidecar_url("file:///tmp/demo.icechunk/")
+        assert result == "file:///tmp/demo.icechunk/_intake_demo.json"
+
     def test_s3_url(self):
         result = _sidecar_url("s3://my-bucket/prefix/catalog.icechunk")
         assert result == "s3://my-bucket/prefix/catalog.icechunk/_intake_catalog.json"

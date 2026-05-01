@@ -222,8 +222,13 @@ def _sidecar_url(store_path: Path | str) -> str:
     fname = _intake_cat_filename(store_str)
 
     if scheme in ("", "file") or (len(scheme) == 1 and scheme.isalpha()):
-        # Local filesystem — safe to use Path for joining.
-        return str(Path(store_str).expanduser() / fname)
+        if scheme == "file":
+            # file:// URI — string-join so that ``file:///path`` is not mangled
+            # to ``file:/path`` by Path() on POSIX.
+            return f"{store_str.rstrip('/')}/{fname}"
+        else:
+            # Bare local path (or Windows drive letter) — Path() is safe here.
+            return str(Path(store_str).expanduser() / fname)
     else:
         # Cloud URI — avoid Path which collapses ``://`` to ``:/``.
         return f"{store_str.rstrip('/')}/{fname}"

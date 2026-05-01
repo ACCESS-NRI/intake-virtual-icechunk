@@ -112,8 +112,44 @@ class TestIcechunkCatalogFromJson:
         loaded = IcechunkCatalog.from_json(str(tmp_path / "saved-cat.json"))
         assert loaded.store == str(icechunk_store_path)
 
+    def test_sidecar_round_trip_vcc_config(self, icechunk_store_path, sample_data):
+        """
+        Regression: the virtual chunk container config must survive a full
+        sidecar round-trip (write → re-open catalog → read VCC).
 
-class TestIcechunkCatalogConstructorKwargs:
+        This exercises:
+        - _sidecar_url correctly locates the sidecar (no file:// mangling)
+        - fsspec.open() can read it
+        - VirtualChunkContainerModel serialises / deserialises intact
+        """
+        # Open catalog and record the original VCC config
+        cat = IcechunkCatalog(store=icechunk_store_path)
+        original_url_prefix = cat.virtual_chunk_model.url_prefix
+        original_store_type = cat.virtual_chunk_model.store_type
+
+        # Re-open from the store path (exercises __init__ sidecar read path)
+        cat2 = IcechunkCatalog(store=icechunk_store_path)
+        assert cat2.virtual_chunk_model.url_prefix == original_url_prefix
+        assert cat2.virtual_chunk_model.store_type == original_store_type
+
+        # Also verify the reconstructed VirtualChunkContainer has the right prefix
+        vcc = cat2.virtual_chunk_model.to_virtual_chunk_container()
+        assert vcc.url_prefix == original_url_prefix
+
+    def test_sidecar_options_independent_of_storage_options(self, icechunk_store_path):
+        """
+        sidecar_options and storage_options must be independent: passing an
+        explicit sidecar_options={} should still let the catalog open normally
+        because the sidecar is on the local filesystem (no fsspec opts needed).
+        """
+        cat = IcechunkCatalog(
+            store=icechunk_store_path,
+            storage_options={"from_env": True},
+            sidecar_options={},  # explicitly empty \u2014 local FS doesn\u2019t need credentials
+        )
+        assert cat.storage_options == {"from_env": True}
+        assert cat.virtual_chunk_model is not None
+
     """
     Verify that storage_options, xarray_kwargs, and virtual_chunk_model are
     each wired to the correct constructor parameter with no cross-talk.

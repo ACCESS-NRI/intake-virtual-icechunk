@@ -94,6 +94,7 @@ class IcechunkCatalog(Catalog):
         store: Path | str,
         *,
         storage_options=None,
+        sidecar_options=None,
         xarray_kwargs=None,
         virtual_chunk_model=None,
         **intake_kwargs,
@@ -104,8 +105,16 @@ class IcechunkCatalog(Catalog):
         # TBC if this is a good idea.
         self.store: str = str(store)
 
+        # ``sidecar_options`` are fsspec kwargs used *only* to open the JSON
+        # sidecar file.  They default to ``storage_options`` when not supplied
+        # so that callers don't need to repeat credentials for the common case
+        # where the sidecar lives inside the same object-store bucket.  Provide
+        # an explicit ``sidecar_options={}`` to pass nothing to fsspec.
+        effective_sidecar_opts = (
+            sidecar_options if sidecar_options is not None else (storage_options or {})
+        )
         sidecar_url = _sidecar_url(self.store)
-        with fsspec.open(sidecar_url, **(storage_options or {})) as f:
+        with fsspec.open(sidecar_url, **effective_sidecar_opts) as f:
             metadata = json.load(f)
             self.storage_options = storage_options or metadata.get(
                 "storage_options", {}
@@ -218,6 +227,10 @@ class IcechunkCatalog(Catalog):
         return cls(
             store=model.store,
             storage_options=model.storage_options,
+            # The sidecar inside the store directory uses the same credentials as
+            # the store itself; the caller-supplied storage_options were for the
+            # standalone JSON file passed to from_json(), which may differ.
+            sidecar_options=model.storage_options,
             xarray_kwargs=xarray_kwargs or {},
             virtual_chunk_model=model.virtual_chunk_model.to_dict(),
         )
