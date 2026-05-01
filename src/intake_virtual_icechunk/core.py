@@ -394,13 +394,6 @@ class IcechunkCatalog(Catalog):
         if not any(key in colnames for key in query.keys()):
             return IcechunkCatalog._from_parent(self, [])
 
-        matched = [
-            key
-            for key in self.keys()
-            if _match_query(dict(self._root_group[key].attrs), query)
-        ]
-        return IcechunkCatalog._from_parent(self, matched)
-
         lf = pl.from_pandas(self.df.reset_index()).lazy()
         normalized_query = {
             k: v if isinstance(v, list) else [v] for k, v in query.items()
