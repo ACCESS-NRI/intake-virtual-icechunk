@@ -10,8 +10,8 @@ import xarray as xr
 
 from intake_virtual_icechunk.cat import VirtualIcechunkCatalogModel
 from intake_virtual_icechunk.core import IcechunkCatalog, _nunique
-from intake_virtual_icechunk.telemetry import TelemetryContext, create_demo_http_emitter
 from intake_virtual_icechunk.source._containers import VirtualChunkContainerModel
+from intake_virtual_icechunk.telemetry import TelemetryContext, create_demo_http_emitter
 from intake_virtual_icechunk.utils import _intake_cat_filename
 
 
@@ -344,7 +344,9 @@ class TestIcechunkCatalogTelemetry:
         assert result.telemetry_context.search_params == {"source_id": "BCC-ESM1"}
         assert result.telemetry_context.search_result_count == len(result.keys())
 
-    def test_to_xarray_attaches_lineage_attrs_and_emits_events(self, icechunk_store_path):
+    def test_to_xarray_attaches_lineage_attrs_and_emits_events(
+        self, icechunk_store_path
+    ):
         events = []
 
         def emitter(event, context, payload):
@@ -395,7 +397,9 @@ class TestDemoHttpTelemetryEmitter:
             captured["timeout"] = timeout
             return DummyResponse()
 
-        monkeypatch.setattr("intake_virtual_icechunk.telemetry.request.urlopen", fake_urlopen)
+        monkeypatch.setattr(
+            "intake_virtual_icechunk.telemetry.request.urlopen", fake_urlopen
+        )
 
         emitter = create_demo_http_emitter(
             "https://example.test/telemetry",

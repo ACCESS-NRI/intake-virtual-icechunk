@@ -126,7 +126,9 @@ class IcechunkCatalog(Catalog):
             self.virtual_chunk_model.to_virtual_chunk_container()
         )
 
-        self.telemetry_context = telemetry_context or TelemetryContext(store_id=self.store)
+        self.telemetry_context = telemetry_context or TelemetryContext(
+            store_id=self.store
+        )
         self.telemetry_emitter = telemetry_emitter
 
         self._entries: dict[str, IcechunkDataSource] = {}
@@ -338,7 +340,9 @@ class IcechunkCatalog(Catalog):
                 group=key,
                 storage_options=self.storage_options,
                 xarray_kwargs=self.xarray_kwargs,
-                telemetry_context=self.telemetry_context.with_updates(selection={"key": key}),
+                telemetry_context=self.telemetry_context.with_updates(
+                    selection={"key": key}
+                ),
                 telemetry_emitter=self.telemetry_emitter,
             )
         return self._entries[key]
@@ -441,7 +445,9 @@ class IcechunkCatalog(Catalog):
                 group=key,
                 storage_options=self.storage_options,
                 xarray_kwargs=self.xarray_kwargs,
-                telemetry_context=self.telemetry_context.with_updates(selection={"key": key}),
+                telemetry_context=self.telemetry_context.with_updates(
+                    selection={"key": key}
+                ),
                 telemetry_emitter=self.telemetry_emitter,
             ).to_xarray()
             row: dict = {"key": key}
@@ -509,7 +515,9 @@ class IcechunkCatalog(Catalog):
                 group=key,
                 storage_options=self.storage_options,
                 xarray_kwargs=merged_kwargs,
-                telemetry_context=self.telemetry_context.with_updates(selection={"key": key}),
+                telemetry_context=self.telemetry_context.with_updates(
+                    selection={"key": key}
+                ),
                 telemetry_emitter=self.telemetry_emitter,
             )
             result[key] = source.to_xarray()
