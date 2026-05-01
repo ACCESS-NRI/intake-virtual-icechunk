@@ -113,6 +113,84 @@ class TestIcechunkCatalogFromJson:
         assert loaded.store == str(icechunk_store_path)
 
 
+class TestIcechunkCatalogConstructorKwargs:
+    """
+    Verify that storage_options, xarray_kwargs, and virtual_chunk_model are
+    each wired to the correct constructor parameter with no cross-talk.
+    """
+
+    def test_storage_options_kwarg_is_assigned(self, icechunk_store_path):
+        """Explicit storage_options kwarg must land on self.storage_options."""
+        opts = {"from_env": True}
+        cat = IcechunkCatalog(store=icechunk_store_path, storage_options=opts)
+        assert cat.storage_options == opts
+
+    def test_xarray_kwargs_kwarg_is_assigned(self, icechunk_store_path):
+        """Explicit xarray_kwargs kwarg must land on self.xarray_kwargs."""
+        xr_kw = {"decode_cf": False}
+        cat = IcechunkCatalog(store=icechunk_store_path, xarray_kwargs=xr_kw)
+        assert cat.xarray_kwargs == xr_kw
+
+    def test_storage_options_does_not_bleed_into_xarray_kwargs(
+        self, icechunk_store_path
+    ):
+        """Passing storage_options must not overwrite xarray_kwargs."""
+        opts = {"from_env": True}
+        cat = IcechunkCatalog(store=icechunk_store_path, storage_options=opts)
+        # xarray_kwargs should come from metadata (or default {}), not from opts
+        assert cat.xarray_kwargs != opts
+
+    def test_storage_options_does_not_bleed_into_virtual_chunk_model(
+        self, icechunk_store_path
+    ):
+        """Passing storage_options must not overwrite virtual_chunk_model."""
+        opts = {"from_env": True}
+        cat_with = IcechunkCatalog(store=icechunk_store_path, storage_options=opts)
+        cat_without = IcechunkCatalog(store=icechunk_store_path)
+        # virtual_chunk_model should be identical regardless of storage_options
+        assert (
+            cat_with.virtual_chunk_model.url_prefix
+            == cat_without.virtual_chunk_model.url_prefix
+        )
+
+    def test_xarray_kwargs_does_not_bleed_into_storage_options(
+        self, icechunk_store_path
+    ):
+        """Passing xarray_kwargs must not overwrite storage_options."""
+        xr_kw = {"decode_cf": False}
+        cat = IcechunkCatalog(store=icechunk_store_path, xarray_kwargs=xr_kw)
+        assert cat.storage_options != xr_kw
+
+    def test_defaults_fall_back_to_metadata(self, icechunk_store_path):
+        """When no kwargs are provided, values come from the JSON metadata."""
+        cat_default = IcechunkCatalog(store=icechunk_store_path)
+        cat_explicit_none = IcechunkCatalog(
+            store=icechunk_store_path,
+            storage_options=None,
+            xarray_kwargs=None,
+            virtual_chunk_model=None,
+        )
+        assert cat_default.storage_options == cat_explicit_none.storage_options
+        assert cat_default.xarray_kwargs == cat_explicit_none.xarray_kwargs
+        assert (
+            cat_default.virtual_chunk_model.url_prefix
+            == cat_explicit_none.virtual_chunk_model.url_prefix
+        )
+
+    def test_all_three_kwargs_independent(self, icechunk_store_path):
+        """Each kwarg can be set independently without affecting the others."""
+        opts = {"from_env": True}
+        xr_kw = {"decode_cf": False}
+        cat_so = IcechunkCatalog(store=icechunk_store_path, storage_options=opts)
+        cat_xr = IcechunkCatalog(store=icechunk_store_path, xarray_kwargs=xr_kw)
+
+        assert cat_so.storage_options == opts
+        assert cat_so.xarray_kwargs != opts
+
+        assert cat_xr.xarray_kwargs == xr_kw
+        assert cat_xr.storage_options != xr_kw
+
+
 class TestIcechunkCatalogKeys:
     """
     This class has *not* been human audited.
