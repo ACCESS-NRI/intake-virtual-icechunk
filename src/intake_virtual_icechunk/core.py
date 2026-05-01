@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Callable
 from functools import cached_property
 from pathlib import Path
 
@@ -472,6 +473,8 @@ class IcechunkCatalog(Catalog):
         self,
         xarray_kwargs: dict | None = None,
         progressbar: bool = True,
+        preprocess: Callable | None = None,
+        storage_options: dict | None = None,
     ) -> dict:
         """
         Load catalog entries into a dictionary of xarray Datasets.
@@ -484,6 +487,17 @@ class IcechunkCatalog(Catalog):
             construction time.
         progressbar : bool, optional
             If ``True``, display a progress bar while loading datasets.
+        preprocess : callable, optional
+            A callable with the signature ``preprocess(ds: xr.Dataset) ->
+            xr.Dataset`` applied to each dataset immediately after loading,
+            mirroring the ``preprocess`` argument of
+            :func:`xarray.open_mfdataset`.
+        storage_options : dict, optional
+            Storage credentials/config merged with (and taking precedence over)
+            the catalog-level ``storage_options``.  Retained for API parity
+            with ``intake-esm``; note that since the Icechunk store is opened
+            at catalog-instantiation time, these options apply only to
+            subsequent store accesses.
 
         Returns
         -------
@@ -491,6 +505,7 @@ class IcechunkCatalog(Catalog):
             One Dataset per catalog entry, keyed by the group path.
         """
         merged_kwargs = {**self.xarray_kwargs, **(xarray_kwargs or {})}
+        merged_storage = {**self.storage_options, **(storage_options or {})}
         keys = self.keys()
 
         if progressbar:
@@ -507,10 +522,13 @@ class IcechunkCatalog(Catalog):
                 key=key,
                 store=self._zarr_store,
                 group=key,
-                storage_options=self.storage_options,
+                storage_options=merged_storage,
                 xarray_kwargs=merged_kwargs,
             )
-            result[key] = source.to_xarray()
+            ds = source.to_xarray()
+            if preprocess is not None:
+                ds = preprocess(ds)
+            result[key] = ds
         return result
 
     def to_xarray(self, **kwargs):

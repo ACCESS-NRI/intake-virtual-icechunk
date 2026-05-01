@@ -332,6 +332,53 @@ class TestIcechunkCatalogDf:
         assert all(df["source_id"] == "BCC-ESM1")
 
 
+class TestIcechunkCatalogToDatasetDict:
+    def test_returns_dict_of_datasets(self, icechunk_store_path):
+        cat = IcechunkCatalog(store=icechunk_store_path)
+        result = cat.search(filename="ocean.nc").to_dataset_dict(progressbar=False)
+        assert isinstance(result, dict)
+        assert len(result) > 0
+        for ds in result.values():
+            assert isinstance(ds, xr.Dataset)
+
+    def test_preprocess_applied_to_each_dataset(self, icechunk_store_path):
+        cat = IcechunkCatalog(store=icechunk_store_path)
+
+        def mark(ds):
+            return ds.assign_attrs(preprocessed=True)
+
+        result = cat.search(filename="ocean.nc").to_dataset_dict(
+            preprocess=mark, progressbar=False
+        )
+        assert len(result) > 0
+        for ds in result.values():
+            assert ds.attrs.get("preprocessed") is True
+
+    def test_preprocess_none_does_not_alter_datasets(self, icechunk_store_path):
+        cat = IcechunkCatalog(store=icechunk_store_path)
+        without = cat.search(filename="ocean.nc").to_dataset_dict(progressbar=False)
+        with_none = cat.search(filename="ocean.nc").to_dataset_dict(
+            preprocess=None, progressbar=False
+        )
+        assert set(without.keys()) == set(with_none.keys())
+
+    def test_storage_options_merged_does_not_break_loading(self, icechunk_store_path):
+        cat = IcechunkCatalog(store=icechunk_store_path)
+        result = cat.search(filename="ocean.nc").to_dataset_dict(
+            storage_options={"extra_key": "extra_value"}, progressbar=False
+        )
+        assert len(result) > 0
+
+    def test_xarray_kwargs_override_catalog_kwargs(self, icechunk_store_path):
+        cat = IcechunkCatalog(store=icechunk_store_path)
+        result = cat.search(filename="ocean.nc").to_dataset_dict(
+            xarray_kwargs={"mask_and_scale": False}, progressbar=False
+        )
+        assert len(result) > 0
+        for ds in result.values():
+            assert isinstance(ds, xr.Dataset)
+
+
 class TestIcechunkCatalogToXarray:
     """
     This class has *not* been human audited.
