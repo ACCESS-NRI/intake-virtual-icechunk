@@ -272,11 +272,20 @@ class TestIcechunkCatalogSearch:
         """Chaining two searches should equal the AND of both queries at once."""
         cat = IcechunkCatalog(store=icechunk_store_path)
         df = cat.df
-        filename_val = df["filename"].dropna().iloc[0]
-        freq_val = df["frequency"].dropna().iloc[0]
+        scalar_cols = [
+            c
+            for c in df.columns
+            if c not in cat.columns_with_iterables
+            and not df[c].apply(lambda x: isinstance(x, (list | tuple))).any()
+        ]
+        if len(scalar_cols) < 2:
+            pytest.skip("Need at least 2 scalar columns for chained search test")
+        col1, col2 = scalar_cols[0], scalar_cols[1]
+        val1 = df[col1].dropna().iloc[0]
+        val2 = df[col2].dropna().iloc[0]
 
-        chained = cat.search(filename=filename_val).search(frequency=freq_val)
-        combined = cat.search(filename=filename_val, frequency=freq_val)
+        chained = cat.search(**{col1: val1}).search(**{col2: val2})
+        combined = cat.search(**{col1: val1, col2: val2})
 
         assert sorted(chained.keys()) == sorted(combined.keys())
 

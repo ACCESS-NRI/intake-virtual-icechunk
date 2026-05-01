@@ -145,7 +145,9 @@ def pl_search(
     df = lf.collect().to_pandas()
 
     for colname, dtype in iterable_dtypes.items():
-        df[colname] = df[colname].apply(dtype)
+        df[colname] = df[colname].apply(
+            lambda x, d=dtype: d(x) if x is not None else None
+        )
 
     return df
 
