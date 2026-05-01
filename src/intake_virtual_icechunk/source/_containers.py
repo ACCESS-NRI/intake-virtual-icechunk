@@ -63,14 +63,12 @@ class VirtualChunkContainerModel:
     def from_virtual_chunk_container(
         vc_container: VirtualChunkContainer,
         store_options: dict | None = None,
-    ) -> "VirtualChunkContainerModel":
+    ) -> VirtualChunkContainerModel:
         # Filter to only non-credential, serialisable keys so that config such
         # as a custom endpoint URL survives a round-trip through the JSON sidecar
         # without storing secrets.
         safe_kwargs = {
-            k: v
-            for k, v in (store_options or {}).items()
-            if k in _VCC_SAFE_KWARGS
+            k: v for k, v in (store_options or {}).items() if k in _VCC_SAFE_KWARGS
         }
         return VirtualChunkContainerModel(
             url_prefix=vc_container.url_prefix,
@@ -106,7 +104,7 @@ class VirtualChunkContainerModel:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: dict) -> "VirtualChunkContainerModel":
+    def from_dict(cls, d: dict) -> VirtualChunkContainerModel:
         """
         Create a VirtualChunkContainerModel from a dictionary (e.g. from JSON).
         """
