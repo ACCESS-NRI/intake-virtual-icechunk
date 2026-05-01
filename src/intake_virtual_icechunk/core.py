@@ -9,6 +9,7 @@ from collections.abc import Callable
 from functools import cached_property
 from pathlib import Path
 
+import fsspec
 import pandas as pd
 import polars as pl
 import zarr
@@ -18,14 +19,42 @@ from intake_virtual_icechunk._search import pl_search
 from intake_virtual_icechunk._source import IcechunkDataSource
 from intake_virtual_icechunk.source._containers import VirtualChunkContainerModel
 from intake_virtual_icechunk.utils import (
-    _intake_cat_filename,
     _resolve_storage,
+    _sidecar_url,
 )
 
 if sys.version_info >= (3, 13):
     from warnings import deprecated
 else:
     from typing_extensions import deprecated
+
+
+def _read_sidecar_metadata(
+    store: str,
+    storage_options: dict | None = None,
+    sidecar_options: dict | None = None,
+) -> dict:
+    """
+    Open the JSON sidecar file for *store* and return its raw contents.
+
+    Parameters
+    ----------
+    store :
+        Path or URI of the Icechunk store directory.
+    storage_options :
+        Credential/config kwargs for the Icechunk storage backend.  Used as
+        the default fsspec kwargs when *sidecar_options* is ``None``.
+    sidecar_options :
+        fsspec kwargs used *only* to open the sidecar file.  When ``None``
+        the function falls back to *storage_options* (common case: sidecar
+        lives in the same bucket).  Pass ``{}`` explicitly to send nothing
+        to fsspec (e.g. sidecar is local, store is remote).
+    """
+    effective = (
+        sidecar_options if sidecar_options is not None else (storage_options or {})
+    )
+    with fsspec.open(_sidecar_url(store), **effective) as f:
+        return json.load(f)
 
 
 def _match_query(attrs: dict, query: dict) -> bool:
@@ -93,8 +122,10 @@ class IcechunkCatalog(Catalog):
         store: Path | str,
         *,
         storage_options=None,
+        sidecar_options=None,
         xarray_kwargs=None,
         virtual_chunk_model=None,
+        catalog_id=None,
         **intake_kwargs,
     ):
         super().__init__(**intake_kwargs)
@@ -103,18 +134,29 @@ class IcechunkCatalog(Catalog):
         # TBC if this is a good idea.
         self.store: str = str(store)
 
-        self.store_json = Path(self.store) / _intake_cat_filename(self.store)
-
-        with open(self.store_json) as f:
-            metadata = json.load(f)
+        if virtual_chunk_model is None:
+            metadata = _read_sidecar_metadata(
+                self.store, storage_options, sidecar_options
+            )
             self.storage_options = storage_options or metadata.get(
                 "storage_options", {}
             )
             self.xarray_kwargs = xarray_kwargs or metadata.get("xarray_kwargs", {})
             self.virtual_chunk_model = VirtualChunkContainerModel.from_dict(
-                virtual_chunk_model or metadata.get("virtual_chunk_model", {})
+                metadata.get("virtual_chunk_model", {})
             )
             self._id = metadata.get("id", None)
+        else:
+            # Full config already supplied by the caller (e.g. _from_parent or
+            # from_json).  Skip the sidecar read entirely — this avoids the
+            # sidecar_options/storage_options confusion when constructing derived
+            # catalogs and prevents an unnecessary round-trip to object storage.
+            self.storage_options = storage_options or {}
+            self.xarray_kwargs = xarray_kwargs or {}
+            self.virtual_chunk_model = VirtualChunkContainerModel.from_dict(
+                virtual_chunk_model
+            )
+            self._id = catalog_id or None
 
         self.virtual_chunk_container = (
             self.virtual_chunk_model.to_virtual_chunk_container()
@@ -181,6 +223,9 @@ class IcechunkCatalog(Catalog):
             xarray_kwargs=parent.xarray_kwargs,
             virtual_chunk_model=parent.virtual_chunk_model.to_dict(),
         )
+        # Preserve parent metadata that is not re-read from the sidecar when
+        # virtual_chunk_model is supplied (see __init__ branching logic).
+        cat._id = parent._id
         # Share the already-opened backend so we don't re-open the repo.
         cat._open_repo = parent._open_repo
         cat._open_zarr_store = parent._open_zarr_store
@@ -220,6 +265,7 @@ class IcechunkCatalog(Catalog):
             storage_options=model.storage_options,
             xarray_kwargs=xarray_kwargs or {},
             virtual_chunk_model=model.virtual_chunk_model.to_dict(),
+            catalog_id=model.id or None,
         )
 
     # ------------------------------------------------------------------

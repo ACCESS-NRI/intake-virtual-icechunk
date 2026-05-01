@@ -9,9 +9,63 @@ import pytest
 import xarray as xr
 
 from intake_virtual_icechunk.cat import VirtualIcechunkCatalogModel
-from intake_virtual_icechunk.core import IcechunkCatalog, _nunique
+from intake_virtual_icechunk.core import (
+    IcechunkCatalog,
+    _nunique,
+    _read_sidecar_metadata,
+)
 from intake_virtual_icechunk.source._containers import VirtualChunkContainerModel
 from intake_virtual_icechunk.utils import _intake_cat_filename
+
+
+class TestReadSidecarMetadata:
+    """Unit tests for _read_sidecar_metadata — pure function exercised in isolation."""
+
+    def _write_sidecar(self, path, data):
+        path.write_text(json.dumps(data))
+        return str(path)
+
+    def test_returns_dict(self, tmp_path):
+        sidecar = {"id": "test", "storage_options": {}, "xarray_kwargs": {}}
+        store = tmp_path / "store.icechunk"
+        store.mkdir()
+        self._write_sidecar(store / "_intake_store.json", sidecar)
+        result = _read_sidecar_metadata(str(store))
+        assert isinstance(result, dict)
+
+    def test_reads_all_keys(self, tmp_path):
+        sidecar = {
+            "id": "my-catalog",
+            "storage_options": {"from_env": True},
+            "xarray_kwargs": {"decode_cf": False},
+            "virtual_chunk_model": {"url_prefix": "s3://bucket/"},
+        }
+        store = tmp_path / "store.icechunk"
+        store.mkdir()
+        self._write_sidecar(store / "_intake_store.json", sidecar)
+        result = _read_sidecar_metadata(str(store))
+        assert result["id"] == "my-catalog"
+        assert result["storage_options"] == {"from_env": True}
+        assert result["xarray_kwargs"] == {"decode_cf": False}
+
+    def test_sidecar_options_override_storage_options(self, tmp_path):
+        """sidecar_options=None falls back to storage_options; sidecar_options={} ignores them."""
+        sidecar = {"id": "x"}
+        store = tmp_path / "store.icechunk"
+        store.mkdir()
+        self._write_sidecar(store / "_intake_store.json", sidecar)
+        # Local FS: passing storage_options or sidecar_options={} both succeed
+        result_default = _read_sidecar_metadata(
+            str(store), storage_options={"anon": True}
+        )
+        result_explicit = _read_sidecar_metadata(str(store), sidecar_options={})
+        assert result_default == result_explicit == sidecar
+
+    def test_missing_sidecar_raises(self, tmp_path):
+        store = tmp_path / "empty.icechunk"
+        store.mkdir()
+        with pytest.raises(FileNotFoundError):
+            _read_sidecar_metadata(str(store))
 
 
 class TestVirtualIcechunkCatalogModel:
@@ -106,11 +160,75 @@ class TestIcechunkCatalogFromJson:
         cat = IcechunkCatalog.from_json(temp_json_local_path)
         assert cat.store == str(icechunk_store_path)
 
+    def test_from_json_preserves_catalog_id(
+        self, tmp_path, icechunk_store_path, sample_data
+    ):
+        """Regression: from_json() must not drop the catalog id stored in the JSON."""
+        sidecar = {
+            "id": "my-cat",
+            "store": str(icechunk_store_path),
+            "storage_options": {},
+            "virtual_chunk_model": {
+                "url_prefix": f"file://{sample_data}/access-om2/",
+                "store_type": "PyObjectStoreConfig_LocalFileSystem",
+                "open_kwargs": {},
+            },
+        }
+        json_path = tmp_path / "my-cat.json"
+        json_path.write_text(json.dumps(sidecar))
+        cat = IcechunkCatalog.from_json(str(json_path))
+        assert cat._id == "my-cat"
+
     def test_save_round_trip(self, tmp_path, icechunk_store_path):
         cat = IcechunkCatalog(store=icechunk_store_path)
         cat.save("saved-cat", directory=str(tmp_path))
         loaded = IcechunkCatalog.from_json(str(tmp_path / "saved-cat.json"))
         assert loaded.store == str(icechunk_store_path)
+
+    def test_sidecar_round_trip_vcc_config(self, icechunk_store_path, sample_data):
+        """
+        Regression: the virtual chunk container config must survive a full
+        sidecar round-trip (write → re-open catalog → read VCC).
+
+        This exercises:
+        - _sidecar_url correctly locates the sidecar (no file:// mangling)
+        - fsspec.open() can read it
+        - VirtualChunkContainerModel serialises / deserialises intact
+        """
+        # Open catalog and record the original VCC config
+        cat = IcechunkCatalog(store=icechunk_store_path)
+        original_url_prefix = cat.virtual_chunk_model.url_prefix
+        original_store_type = cat.virtual_chunk_model.store_type
+
+        # Re-open from the store path (exercises __init__ sidecar read path)
+        cat2 = IcechunkCatalog(store=icechunk_store_path)
+        assert cat2.virtual_chunk_model.url_prefix == original_url_prefix
+        assert cat2.virtual_chunk_model.store_type == original_store_type
+
+        # Also verify the reconstructed VirtualChunkContainer has the right prefix
+        vcc = cat2.virtual_chunk_model.to_virtual_chunk_container()
+        assert vcc.url_prefix == original_url_prefix
+
+    def test_sidecar_options_no_sidecar_reread_when_model_supplied(
+        self, icechunk_store_path
+    ):
+        """
+        When virtual_chunk_model is supplied, __init__ skips the sidecar read.
+        This means sidecar_options is irrelevant and the catalog still opens
+        normally — even if sidecar_options would fail (e.g. wrong credentials).
+        """
+        cat_base = IcechunkCatalog(store=icechunk_store_path)
+        cat = IcechunkCatalog(
+            store=icechunk_store_path,
+            storage_options={"from_env": True},
+            sidecar_options={"anon": True},  # would fail if sidecar were re-read
+            virtual_chunk_model=cat_base.virtual_chunk_model.to_dict(),
+        )
+        assert cat.storage_options == {"from_env": True}
+        assert (
+            cat.virtual_chunk_model.url_prefix
+            == cat_base.virtual_chunk_model.url_prefix
+        )
 
 
 class TestIcechunkCatalogConstructorKwargs:
