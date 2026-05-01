@@ -9,6 +9,12 @@ from typing import Any
 import xarray as xr
 from intake.source.base import DataSource, Schema
 
+from intake_virtual_icechunk.telemetry import (
+    TelemetryContext,
+    TelemetryEmitter,
+    emit_telemetry,
+)
+
 
 class IcechunkDataSourceError(Exception):
     pass
@@ -57,6 +63,8 @@ class IcechunkDataSource(DataSource):
         *,
         storage_options: dict[str, Any] | None = None,
         xarray_kwargs: dict[str, Any] | None = None,
+        telemetry_context: TelemetryContext | None = None,
+        telemetry_emitter: TelemetryEmitter | None = None,
         intake_kwargs: dict[str, Any] | None = None,
     ) -> None:
         intake_kwargs = intake_kwargs or {}
@@ -66,6 +74,8 @@ class IcechunkDataSource(DataSource):
         self.group = group
         self.storage_options = storage_options or {}
         self.xarray_kwargs = xarray_kwargs or {}
+        self.telemetry_context = telemetry_context
+        self.telemetry_emitter = telemetry_emitter
         self._ds = None
 
     def __repr__(self) -> str:
@@ -109,7 +119,23 @@ class IcechunkDataSource(DataSource):
     def to_xarray(self) -> xr.Dataset:
         """Return the xarray Dataset (with dask-backed arrays)."""
         self._load_metadata()
-        return self.ds
+        if self.telemetry_context is not None:
+            emit_telemetry(
+                self.telemetry_emitter,
+                "catalog.to_xarray.start",
+                self.telemetry_context,
+                {"key": self.key, "group": self.group},
+            )
+        ds = self.ds
+        if self.telemetry_context is not None:
+            ds.attrs.update(self.telemetry_context.dataset_attrs())
+            emit_telemetry(
+                self.telemetry_emitter,
+                "catalog.to_xarray.end",
+                self.telemetry_context,
+                {"key": self.key, "group": self.group},
+            )
+        return ds
 
     def close(self) -> None:
         """Drop the open dataset from memory."""

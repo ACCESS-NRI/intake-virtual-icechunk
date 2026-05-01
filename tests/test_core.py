@@ -11,6 +11,7 @@ import xarray as xr
 from intake_virtual_icechunk.cat import VirtualIcechunkCatalogModel
 from intake_virtual_icechunk.core import IcechunkCatalog, _nunique
 from intake_virtual_icechunk.source._containers import VirtualChunkContainerModel
+from intake_virtual_icechunk.telemetry import TelemetryContext, create_demo_http_emitter
 from intake_virtual_icechunk.utils import _intake_cat_filename
 
 
@@ -326,3 +327,103 @@ class TestIcechunkCatalog:
 def test__nunique(dataframe, expected):
     result = _nunique(pl.from_pandas(dataframe))
     pd.testing.assert_series_equal(result, expected)
+
+
+class TestIcechunkCatalogTelemetry:
+    def test_search_populates_telemetry_context(self, icechunk_store_path):
+        cat = IcechunkCatalog(
+            store=icechunk_store_path,
+            telemetry_context=TelemetryContext(store_id=str(icechunk_store_path)),
+        )
+
+        result = cat.search(source_id="BCC-ESM1")
+
+        assert result.telemetry_context.store_id == str(icechunk_store_path)
+        assert result.telemetry_context.trace_id == cat.telemetry_context.trace_id
+        assert result.telemetry_context.search_id is not None
+        assert result.telemetry_context.search_params == {"source_id": "BCC-ESM1"}
+        assert result.telemetry_context.search_result_count == len(result.keys())
+
+    def test_to_xarray_attaches_lineage_attrs_and_emits_events(
+        self, icechunk_store_path
+    ):
+        events = []
+
+        def emitter(event, context, payload):
+            events.append((event, context, payload))
+
+        cat = IcechunkCatalog(
+            store=icechunk_store_path,
+            telemetry_context=TelemetryContext(store_id=str(icechunk_store_path)),
+            telemetry_emitter=emitter,
+        )
+
+        result = cat.search(filename="ocean.nc")
+        expected_key = result.keys()[0]
+        ds = result.to_xarray()
+
+        assert ds.attrs["intake_virtual_icechunk_store_id"] == str(icechunk_store_path)
+        assert "intake_virtual_icechunk_trace_id" in ds.attrs
+        assert "intake_virtual_icechunk_search_id" in ds.attrs
+        assert ds.attrs["intake_virtual_icechunk_key"] == expected_key
+
+        event_names = [event for event, _, _ in events]
+        assert event_names == [
+            "catalog.search",
+            "catalog.to_xarray.start",
+            "catalog.to_xarray.end",
+        ]
+        assert events[0][2] == {"query": {"filename": "ocean.nc"}, "result_count": 1}
+        assert events[1][2]["key"] == ds.attrs["intake_virtual_icechunk_key"]
+        assert events[2][2]["group"] == ds.attrs["intake_virtual_icechunk_key"]
+
+
+class TestDemoHttpTelemetryEmitter:
+    def test_posts_event_context_and_payload(self, monkeypatch):
+        captured = {}
+
+        class DummyResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        def fake_urlopen(req, timeout):
+            captured["url"] = req.full_url
+            captured["method"] = req.get_method()
+            captured["headers"] = dict(req.header_items())
+            captured["body"] = req.data
+            captured["timeout"] = timeout
+            return DummyResponse()
+
+        monkeypatch.setattr(
+            "intake_virtual_icechunk.telemetry.request.urlopen", fake_urlopen
+        )
+
+        emitter = create_demo_http_emitter(
+            "https://example.test/telemetry",
+            timeout=2.5,
+            headers={"x-demo": "1"},
+        )
+        context = TelemetryContext(
+            store_id="s3://bucket/store",
+            search_id="search-123",
+            search_params={"experiment_id": "historical"},
+        )
+
+        emitter("catalog.search", context, {"result_count": 3})
+
+        assert captured["url"] == "https://example.test/telemetry"
+        assert captured["method"] == "POST"
+        assert captured["headers"]["Content-type"] == "application/json"
+        assert captured["headers"]["X-demo"] == "1"
+        assert captured["timeout"] == 2.5
+
+        import json
+
+        body = json.loads(captured["body"].decode("utf-8"))
+        assert body["event"] == "catalog.search"
+        assert body["context"]["store_id"] == "s3://bucket/store"
+        assert body["context"]["search_id"] == "search-123"
+        assert body["payload"] == {"result_count": 3}
