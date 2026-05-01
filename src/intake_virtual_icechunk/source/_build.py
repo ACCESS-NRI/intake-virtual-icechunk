@@ -22,6 +22,7 @@ from intake_virtual_icechunk.utils import (
     _intake_cat_filename,
     _resolve_storage,
     _resolve_store,
+    _resolve_vcc_store,
 )
 
 if TYPE_CHECKING:
@@ -270,7 +271,7 @@ class IcechunkStoreBuilder:
 
         self.vc_container = icechunk.VirtualChunkContainer(
             url_prefix=self.source_url_prefix,
-            store=icechunk.local_filesystem_store(self.source_url_prefix),
+            store=_resolve_vcc_store(self.source_url_prefix, self.store_options),
         )
 
         config = icechunk.RepositoryConfig.default()
@@ -364,21 +365,21 @@ class IcechunkStoreBuilder:
                     print(f"Failed to virtualise group {public_key}: {e}")
 
         # Write the JSON sidecar inside the store directory
-
-        # Might not be safe on object stores - deal with that later.
-        storepath = Path(self.store_path).expanduser()
         sidecar_fname = _intake_cat_filename(self.store_path)
-
-        sidecar_dir = str(storepath)
 
         model = VirtualIcechunkCatalogModel(
             store=self.store_path,
             storage_options=self.storage_options,
             virtual_chunk_model=VirtualChunkContainerModel.from_virtual_chunk_container(
-                self.vc_container
+                self.vc_container,
+                store_options=self.store_options,
             ),
         )
-        model.save(sidecar_fname, directory=sidecar_dir or None)
+        model.save(
+            sidecar_fname,
+            directory=self.store_path,
+            storage_options=self.storage_options or None,
+        )
 
     def _attach_catalog_metadata(
         self,

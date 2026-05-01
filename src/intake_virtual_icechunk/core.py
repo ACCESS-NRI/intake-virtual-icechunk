@@ -9,6 +9,7 @@ from collections.abc import Callable
 from functools import cached_property
 from pathlib import Path
 
+import fsspec
 import pandas as pd
 import polars as pl
 import zarr
@@ -18,8 +19,8 @@ from intake_virtual_icechunk._search import pl_search
 from intake_virtual_icechunk._source import IcechunkDataSource
 from intake_virtual_icechunk.source._containers import VirtualChunkContainerModel
 from intake_virtual_icechunk.utils import (
-    _intake_cat_filename,
     _resolve_storage,
+    _sidecar_url,
 )
 
 if sys.version_info >= (3, 13):
@@ -103,9 +104,8 @@ class IcechunkCatalog(Catalog):
         # TBC if this is a good idea.
         self.store: str = str(store)
 
-        self.store_json = Path(self.store) / _intake_cat_filename(self.store)
-
-        with open(self.store_json) as f:
+        sidecar_url = _sidecar_url(self.store)
+        with fsspec.open(sidecar_url, **(storage_options or {})) as f:
             metadata = json.load(f)
             self.storage_options = storage_options or metadata.get(
                 "storage_options", {}
