@@ -493,13 +493,10 @@ class IcechunkCatalog(Catalog):
             }
 
             row.update(attrs)
+            records.append(
+                {k: tuple(v) if isinstance(v, list) else v for k, v in row.items()}
+            )
 
-            records.append(row)
-            # Finally, convert all list columns to tuples
-            records = [
-                {k: tuple(v) if isinstance(v, list) else v for k, v in r.items()}
-                for r in records
-            ]
         return pd.DataFrame(records).set_index("key", drop=True)
 
     @cached_property
