@@ -1,0 +1,14 @@
+{
+  "id": "_intake_icecat",
+  "version": "1.0.0",
+  "store": "/Users/u1166368/catalog/intake-virtual-icechunk/tests/data/access-om2/icecat.icechunk",
+  "virtual_chunk_model": {
+    "url_prefix": "file:///Users/u1166368/catalog/intake-virtual-icechunk/tests/data/access-om2/",
+    "store_type": "PyObjectStoreConfig_LocalFileSystem",
+    "open_kwargs": {}
+  },
+  "description": null,
+  "title": null,
+  "last_updated": "2026-04-23T14:31:25.036564",
+  "storage_options": {}
+}
