@@ -88,7 +88,7 @@ pytest = ">=9.0.3,<10"
 pytest-cov = "*"
 h5py = "*"
 access-intake-esm = ">=2026.4.19,<2027"
-access-nri-intake = ">=1.6.0,<2"
+access-nri-intake = ">=1.6.2,<2"
 netcdf4 = ">=1.7.4,<2"
 s3fs = ">=2026.4.0,<2027"
 
