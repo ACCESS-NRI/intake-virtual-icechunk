@@ -22,7 +22,7 @@ requirements:
   run:
     - python >=3.12
     {% for dep in deps %}
-    - {{ dep }}
+    - {{ dep | replace('obspec-utils', 'obspec_utils') }}
     {% endfor %}
 
 test:
