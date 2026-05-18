@@ -30,6 +30,7 @@ from intake_virtual_icechunk.utils import (
 
 if TYPE_CHECKING:
     from obspec_utils.registry import ObjectStoreRegistry
+    from obstore.store import ObjectStore
     from virtualizarr.parsers import (
         DMRPPParser,
         FITSParser,
@@ -389,7 +390,7 @@ class IcechunkStoreBuilder:
                 store_options=self.store_options,
             ),
         )
-        sidecar_store = _obs_from_url(
+        sidecar_store: ObjectStore = _obs_from_url(
             _path_to_url(self.store_path),
             config=_filter_config_args(self.storage_options),
         )

@@ -61,7 +61,9 @@ def _read_sidecar_metadata(
     obs_store = _obs_from_url(store_url, config=_filter_config_args(effective))
     fname = _intake_cat_filename(store)
     content = obstore.get(obs_store, fname).bytes()
-    return json.loads(bytes(content))
+    return json.loads(
+        bytes(content)  # double bytes here looks weird but is necessary
+    )
 
 
 def _match_query(attrs: dict, query: dict) -> bool:
