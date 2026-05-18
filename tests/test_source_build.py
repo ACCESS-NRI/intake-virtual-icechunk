@@ -293,6 +293,73 @@ class TestIcechunkStoreBuilder:
         assert "variable_cell_methods" in cat.df.columns
         assert cat.df.loc["ocean.fx.xt_ocean:1.yt_ocean:1.point"].Variable is None
 
+    def test_repr_defaults(self, local_om2_datastore_path, intake_esm_kwargs, tmpdir):
+        """
+        __repr__ should include all key fields with their default values when no
+        optional arguments are provided.
+        """
+        dummy_store_path = tmpdir / "dummy_store.icechunk"
+        builder = IcechunkStoreBuilder(
+            esm_datastore_path=local_om2_datastore_path,
+            icechunk_store_path=dummy_store_path,
+            esm_datastore_kwargs=intake_esm_kwargs,
+        )
+
+        result = repr(builder)
+
+        assert f"esm_datastore_path='{builder.esm_datastore_path}'" in result
+        assert f"icechunk_store_path='{builder.store_path}'" in result
+        assert f"parser={builder.parser.__class__.__name__}" in result
+        assert "storage_options={}" in result
+        assert "store_options={}" in result
+        assert "drop_cols=[]" in result
+        assert "cols_to_deiter=[]" in result
+        assert result.startswith("IcechunkStoreBuilder(")
+        assert result.endswith(")")
+
+    def test_repr_with_custom_args(
+        self, local_om2_datastore_path, intake_esm_kwargs, tmpdir
+    ):
+        """
+        __repr__ should reflect non-default values for all optional arguments.
+        """
+        dummy_store_path = tmpdir / "dummy_store.icechunk"
+        builder = IcechunkStoreBuilder(
+            esm_datastore_path=local_om2_datastore_path,
+            icechunk_store_path=dummy_store_path,
+            esm_datastore_kwargs=intake_esm_kwargs,
+            parser=virtualizarr.parsers.HDFParser,
+            icechunk_storage_options={"key": "value"},
+            icechunk_store_options={"opt": 1},
+            drop_cols=["path"],
+            cols_to_deiter=["variable"],
+        )
+
+        result = repr(builder)
+
+        assert "storage_options={'key': 'value'}" in result
+        assert "store_options={'opt': 1}" in result
+        assert "drop_cols=['path']" in result
+        assert "cols_to_deiter=['variable']" in result
+        assert "parser=HDFParser" in result
+
+    def test_repr_parser_name_matches_instance(
+        self, local_om2_datastore_path, intake_esm_kwargs, tmpdir
+    ):
+        """
+        The parser name in __repr__ should match the class name of the instantiated parser.
+        """
+        dummy_store_path = tmpdir / "dummy_store.icechunk"
+        builder = IcechunkStoreBuilder(
+            esm_datastore_path=local_om2_datastore_path,
+            icechunk_store_path=dummy_store_path,
+            esm_datastore_kwargs=intake_esm_kwargs,
+            parser=virtualizarr.parsers.HDFParser,
+        )
+
+        assert f"parser={builder.parser.__class__.__name__}" in repr(builder)
+        assert "parser=HDFParser" in repr(builder)
+
     def test_build_deiters_cols_exceptionlogic(
         self, local_om2_datastore_path, intake_esm_kwargs, tmpdir
     ):

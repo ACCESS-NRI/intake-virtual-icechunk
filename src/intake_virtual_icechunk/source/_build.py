@@ -143,6 +143,17 @@ class IcechunkStoreBuilder:
         parser = parser or self._infer_parser()
         self.parser = parser()
 
+    def __repr__(self) -> str:
+        return (
+            f"IcechunkStoreBuilder(esm_datastore_path='{self.esm_datastore_path}', "
+            f"icechunk_store_path='{self.store_path}', "
+            f"parser={self.parser.__class__.__name__}, "
+            f"storage_options={self.storage_options}, "
+            f"store_options={self.store_options}, "
+            f"drop_cols={self.drop_cols}, "
+            f"cols_to_deiter={self.cols_to_deiter})"
+        )
+
     @property
     def esm_ds(self) -> esm_datastore:
         """
