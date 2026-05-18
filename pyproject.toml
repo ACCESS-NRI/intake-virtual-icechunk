@@ -27,6 +27,14 @@ test = [
     "pytest-cov",
 ]
 
+docs = [
+    "myst-nb",
+    "numpydoc",
+    "sphinx",
+    "sphinx-book-theme",
+    "sphinx-copybutton",
+]
+
 virtualizarr = [
     "virtualizarr",
 ]
@@ -97,6 +105,17 @@ s3fs = ">=2026.4.0,<2027"
 setup-ipykernel = {cmd= "python -m ipykernel install --user --name=intake-virtual-icechunk-dev", description = "Set up the ipykernel for the dev environment"}
 test-coverage = { cmd = "pytest tests/ --cov=intake_virtual_icechunk --cov-report=html --cov-report=term", description = "Run tests locally with coverage and open the HTML report" }
 
+[tool.pixi.feature.docs.pypi-dependencies]
+intake_virtual_icechunk = { path = ".", editable = true }
+myst-nb = "*"
+numpydoc = "*"
+sphinx = "*"
+sphinx-book-theme = "*"
+sphinx-copybutton = "*"
+
+[tool.pixi.feature.docs.tasks]
+docs-build = { cmd = "sphinx-build -b html -W --keep-going docs docs/_build/html", description = "Build the docs locally and fail on warnings" }
+
 [tool.pixi.feature.test.pypi-dependencies]
 intake_virtual_icechunk = { path = ".", editable = false }
 
@@ -125,6 +144,7 @@ lint = { cmd = "ruff check src/" , description = "Run linting" }
 
 [tool.pixi.environments]
 default = { features = ["dev","py313","icechunk-2", "virtualizarr"], solve-group = "default" }
+docs = { features = ["docs", "py313", "virtualizarr"], solve-group = "docs" }
 icechunk-1 = { features = ["dev","py313","icechunk-1", "virtualizarr"], solve-group = "icechunk-1" }
 test-py312 = ["test", "py312", "virtualizarr"]
 test-py313 = ["test", "py313", "virtualizarr"]
