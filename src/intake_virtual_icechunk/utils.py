@@ -124,10 +124,8 @@ def _resolve_store(
 
     bucket = parsed.netloc
 
-    # Remove icechunk specific options. We don't want users to have to configure
-    # extra crap, so just do it internally here - should be a relatively short
-    # enumeration given it's configuration arguments we're trying to filter out,
-    # not arbitrary user options.
+    # Remove icechunk specific options, so that obstore can use the same config.
+    # Should be fine - if it needs changing later so be it.
     obstore_config = _filter_config_args(store_options)
 
     if scheme == "s3":
