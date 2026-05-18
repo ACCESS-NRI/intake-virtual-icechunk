@@ -22,6 +22,7 @@ from intake_virtual_icechunk.source._containers import VirtualChunkContainerMode
 from intake_virtual_icechunk.utils import (
     _filter_config_args,
     _intake_cat_filename,
+    _path_to_url,
     _resolve_storage,
     _resolve_store,
     _resolve_vcc_store,
@@ -389,7 +390,7 @@ class IcechunkStoreBuilder:
             ),
         )
         sidecar_store = _obs_from_url(
-            self.store_path,
+            _path_to_url(self.store_path),
             config=_filter_config_args(self.storage_options),
         )
         model.save(sidecar_fname, store=sidecar_store)

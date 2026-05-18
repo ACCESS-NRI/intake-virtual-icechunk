@@ -4,23 +4,27 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from collections.abc import Callable
 from functools import cached_property
 from pathlib import Path
 
-import fsspec
+import obstore
 import pandas as pd
 import polars as pl
 import zarr
 from intake.catalog import Catalog
+from obstore.store import from_url as _obs_from_url
 
 from intake_virtual_icechunk._search import pl_search
 from intake_virtual_icechunk._source import IcechunkDataSource
 from intake_virtual_icechunk.source._containers import VirtualChunkContainerModel
 from intake_virtual_icechunk.utils import (
+    _filter_config_args,
+    _intake_cat_filename,
+    _path_to_url,
     _resolve_storage,
-    _sidecar_url,
 )
 
 if sys.version_info >= (3, 13):
@@ -43,18 +47,21 @@ def _read_sidecar_metadata(
         Path or URI of the Icechunk store directory.
     storage_options :
         Credential/config kwargs for the Icechunk storage backend.  Used as
-        the default fsspec kwargs when *sidecar_options* is ``None``.
+        the default obstore kwargs when *sidecar_options* is ``None``.
     sidecar_options :
-        fsspec kwargs used *only* to open the sidecar file.  When ``None``
+        obstore kwargs used *only* to open the sidecar file.  When ``None``
         the function falls back to *storage_options* (common case: sidecar
         lives in the same bucket).  Pass ``{}`` explicitly to send nothing
-        to fsspec (e.g. sidecar is local, store is remote).
+        to obstore (e.g. sidecar is local, store is remote).
     """
     effective = (
         sidecar_options if sidecar_options is not None else (storage_options or {})
     )
-    with fsspec.open(_sidecar_url(store), **effective) as f:
-        return json.load(f)
+    store_url = _path_to_url(store)
+    obs_store = _obs_from_url(store_url, config=_filter_config_args(effective))
+    fname = _intake_cat_filename(store)
+    content = obstore.get(obs_store, fname).bytes()
+    return json.loads(bytes(content))
 
 
 def _match_query(attrs: dict, query: dict) -> bool:
@@ -299,7 +306,9 @@ class IcechunkCatalog(Catalog):
             storage_options=self.storage_options,
             virtual_chunk_model=self.virtual_chunk_model,
         )
-        model.save(name, directory=directory, json_dump_kwargs=json_dump_kwargs)
+        dir_url = _path_to_url(directory or os.getcwd())
+        obs_store = _obs_from_url(dir_url, config=_filter_config_args(self.storage_options))
+        model.save(name, store=obs_store, json_dump_kwargs=json_dump_kwargs)
 
     # ------------------------------------------------------------------
     # Core catalog interface

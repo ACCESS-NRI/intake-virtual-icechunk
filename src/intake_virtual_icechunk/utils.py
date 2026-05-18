@@ -3,6 +3,7 @@ Copyright 2026 ACCESS-NRI and contributors. See the top-level COPYRIGHT file for
 SPDX-License-Identifier: Apache-2.0
 """
 
+import copy
 import os
 import posixpath
 from pathlib import Path
@@ -286,3 +287,50 @@ def _resolve_vcc_store(url_prefix: str, store_options: dict) -> Any:
         f"Unsupported URL prefix scheme: {scheme!r}. "
         "Expected a local path, file://, or s3://."
     )
+
+
+def _path_to_url(path: str | Path) -> str:
+    """
+    Ensure a path has a URL scheme, converting bare local paths to ``file://`` URLs.
+
+    obstore's ``from_url`` requires an explicit scheme; bare POSIX paths such as
+    ``/tmp/store`` are rejected as "relative URL without a base".  This helper
+    normalises them to ``file:///tmp/store`` while leaving cloud URLs (``s3://``,
+    ``gs://``, ``az://``) and already-correct ``file://`` URLs unchanged.
+
+    ``os.path.abspath`` is applied so that relative paths (e.g. used in tests
+    or notebooks) are also resolved correctly.
+    """
+    path_str = str(path)
+    parsed = urlparse(path_str)
+    scheme = parsed.scheme
+
+    # Already has a recognised URL scheme — return as-is.
+    if scheme == "file" or (len(scheme) > 1 and scheme not in ("",)):
+        return path_str
+
+    # Bare local path (no scheme, or single-char Windows drive letter).
+    abs_path = os.path.abspath(path_str)
+    return f"file://{abs_path}"
+
+
+def _filter_config_args(store_options: dict) -> dict:
+    """
+    Translate icechunk-style storage options to obstore config kwargs.
+
+    Keys that are icechunk-specific (not understood by obstore) are dropped.
+    ``endpoint_url`` is renamed to ``endpoint``.  ``anonymous`` is renamed to
+    ``skip_signature`` and only included when it was explicitly set.
+    """
+
+    obstore_opts = copy.deepcopy(store_options)
+
+    icechunk_specific_keys = {"s3_compatible", "force_path_style", "anonymous", "from_env"}
+
+    if "endpoint_url" in obstore_opts:
+        obstore_opts["endpoint"] = obstore_opts.pop("endpoint_url")
+
+    if "anonymous" in obstore_opts:
+        obstore_opts["skip_signature"] = obstore_opts.pop("anonymous")
+
+    return {k: v for k, v in obstore_opts.items() if k not in icechunk_specific_keys}

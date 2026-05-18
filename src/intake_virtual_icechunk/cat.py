@@ -6,14 +6,17 @@ from __future__ import annotations
 import datetime
 import json
 import typing
+from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import urlparse
 
-import fsspec
 import obstore
 import pydantic
 from pydantic import ConfigDict
+from obstore.store import from_url as _obs_from_url
 
 from intake_virtual_icechunk.source._containers import VirtualChunkContainerModel
+from intake_virtual_icechunk.utils import _filter_config_args, _path_to_url
 
 if TYPE_CHECKING:
     from obstore.store import ObjectStore
@@ -69,15 +72,23 @@ class VirtualIcechunkCatalogModel(pydantic.BaseModel):
         json_file : str
             Path or URL to the JSON sidecar file.
         storage_options : dict, optional
-            fsspec parameters for reading the JSON file itself (e.g. S3
+            obstore config kwargs for reading the JSON file itself (e.g. S3
             credentials).  These are independent of the catalog's own
             ``storage_options``, which are stored inside the JSON and used to
             open the Icechunk store.
         """
         storage_options = storage_options or {}
-        with fsspec.open(json_file, **storage_options) as fobj:
-            data = json.loads(fobj.read())
-        return cls.model_validate(data)
+        parsed = urlparse(json_file)
+        scheme = parsed.scheme
+        if scheme in ("", "file") or (len(scheme) == 1 and scheme.isalpha()):
+            p = Path(parsed.path if scheme == "file" else json_file)
+            directory_url = _path_to_url(str(p.parent))
+            filename = p.name
+        else:
+            directory_url, filename = json_file.rsplit("/", 1)
+        obs_store = _obs_from_url(directory_url, config=_filter_config_args(storage_options))
+        content = obstore.get(obs_store, filename).bytes()
+        return cls.model_validate(json.loads(bytes(content)))
 
     def save(
         self,

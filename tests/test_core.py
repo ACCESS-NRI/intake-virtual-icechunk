@@ -95,7 +95,9 @@ class TestVirtualIcechunkCatalogModel:
         # Turn the path into a string for easier comparison in the JSON output
         icechunk_store_path = str(icechunk_store_path)
 
-        model.save("my-catalog", directory=str(tmp_path))
+        from obstore.store import from_url as _obs_from_url
+        obs_store = _obs_from_url(f"file://{tmp_path}")
+        model.save("my-catalog", store=obs_store)
         json_path = tmp_path / "my-catalog.json"
         assert json_path.exists()
 
