@@ -108,7 +108,7 @@ def _resolve_store(
     parsed = urlparse(paths[0])
     scheme = parsed.scheme
 
-    if scheme in ("", "file") or (len(scheme) == 1 and scheme.isalpha()):
+    if scheme in ("", "file"):
         # Normalise all paths to bare POSIX paths so commonpath works uniformly.
         local_paths = [
             urlparse(p).path if urlparse(p).scheme == "file" else os.path.abspath(p)
@@ -124,13 +124,15 @@ def _resolve_store(
 
     bucket = parsed.netloc
 
+    # Remove icechunk specific options, so that obstore can use the same config.
+    # Should be fine - if it needs changing later so be it.
+    obstore_config = _filter_config_args(store_options)
+
     if scheme == "s3":
         url_prefix = f"s3://{bucket}/"
         store = S3Store.from_url(  # type: ignore[assignment]
-            f"{bucket}",
-            endpoint=store_options.get("endpoint", None),
-            access_key_id=store_options.get("access_key_id", None),
-            secret_access_key=store_options.get("secret_access_key", None),
+            url_prefix,
+            config=obstore_config,
         )
         return ObjectStoreRegistry({url_prefix: store}), url_prefix
     elif scheme in ("gs", "gcs"):
@@ -139,9 +141,7 @@ def _resolve_store(
         )
         store = GCSStore.from_url(
             f"{bucket}",
-            endpoint=store_options.get("endpoint", None),
-            access_key_id=store_options.get("access_key_id", None),
-            secret_access_key=store_options.get("secret_access_key", None),
+            config=obstore_config,
         )
     elif scheme in ("az", "abfs"):
         raise NotImplementedError(
@@ -149,10 +149,7 @@ def _resolve_store(
         )
         return AzureStore.from_url(
             f"{bucket}",
-            account=store_options.get("account", None),
-            endpoint=store_options.get("endpoint", None),
-            access_key_id=store_options.get("access_key_id", None),
-            secret_access_key=store_options.get("secret_access_key", None),
+            config=store_options,
         )
 
     return ObjectStoreRegistry({f"{bucket}": store})
@@ -164,7 +161,15 @@ def _resolve_store(
 
 
 _VCC_SAFE_KWARGS: frozenset[str] = frozenset(
-    {"endpoint_url", "endpoint", "allow_http", "region"}
+    {
+        "endpoint_url",
+        "endpoint",
+        "allow_http",
+        "region",
+        "s3_compatible",
+        "force_path_style",
+        "anonymous",
+    }
 )
 """
 The set of keyword-argument names from ``store_options`` that are safe to
@@ -259,6 +264,7 @@ def _resolve_vcc_store(url_prefix: str, store_options: dict) -> Any:
     -------
     icechunk.ObjectStoreConfig
     """
+
     safe_opts = {k: v for k, v in store_options.items() if k in _VCC_SAFE_KWARGS}
 
     parsed = urlparse(url_prefix)
@@ -269,7 +275,7 @@ def _resolve_vcc_store(url_prefix: str, store_options: dict) -> Any:
         return icechunk.local_filesystem_store(path)
 
     elif scheme == "s3":
-        return icechunk.s3_store(url_prefix, **safe_opts)
+        return icechunk.s3_store(**safe_opts)
 
     elif scheme in ("gs", "gcs"):
         raise NotImplementedError(

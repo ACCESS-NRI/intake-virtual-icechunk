@@ -5,6 +5,7 @@ from intake_virtual_icechunk.utils import (
     _filter_config_args,
     _intake_cat_filename,
     _path_to_url,
+    _resolve_store,
     _resolve_vcc_store,
     _sidecar_url,
 )
@@ -170,3 +171,35 @@ class TestFilterConfigArgs:
     def test_passthrough_keys_preserved(self):
         result = _filter_config_args({"region": "ap-southeast-2", "allow_http": False})
         assert result == {"region": "ap-southeast-2", "allow_http": False}
+
+
+class TestResolveStore:
+    def test_local_path(self, tmp_path):
+        result = _resolve_store(f"file://{tmp_path}/", {})
+        # Should return an icechunk local filesystem store config (not raise)
+        assert result is not None
+
+    def test_s3_url(self):
+        result = _resolve_store("s3://my-bucket/", {})
+        assert result is not None
+
+    def test_s3_url_with_endpoint(self):
+        store_options = {
+            "endpoint_url": "https://projects.pawsey.org.au",
+            "s3_compatible": True,
+            "force_path_style": True,
+            "anonymous": True,
+        }
+        result = _resolve_store(
+            "s3://my-bucket/",
+            store_options=store_options,
+        )
+        assert result is not None
+
+    def test_gcs_raises_not_implemented(self):
+        with pytest.raises(NotImplementedError, match="GCS"):
+            _resolve_store("gs://my-bucket/", {})
+
+    def test_azure_raises_not_implemented(self):
+        with pytest.raises(NotImplementedError, match="Azure"):
+            _resolve_store("az://my-container/", {})

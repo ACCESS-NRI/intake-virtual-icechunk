@@ -148,14 +148,17 @@ class IcechunkStoreBuilder:
         self.parser = parser()
 
     def __repr__(self) -> str:
+        """Repr, multiline formatted"""
         return (
-            f"IcechunkStoreBuilder(esm_datastore_path='{self.esm_datastore_path}', "
-            f"icechunk_store_path='{self.store_path}', "
-            f"parser={self.parser.__class__.__name__}, "
-            f"storage_options={self.storage_options}, "
-            f"store_options={self.store_options}, "
-            f"drop_cols={self.drop_cols}, "
-            f"cols_to_deiter={self.cols_to_deiter})"
+            "IcechunkStoreBuilder("
+            f"\n\tesm_datastore_path='{self.esm_datastore_path}', "
+            f"\n\ticechunk_store_path='{self.store_path}', "
+            f"\n\tparser={self.parser.__class__.__name__}, "
+            f"\n\tstorage_options={self.storage_options}, "
+            f"\n\tstore_options={self.store_options}, "
+            f"\n\tdrop_cols={self.drop_cols}, "
+            f"\n\tcols_to_deiter={self.cols_to_deiter}"
+            "\n)"
         )
 
     @property
@@ -229,14 +232,13 @@ class IcechunkStoreBuilder:
 
         We also cache the registry on the builder instance.
         """
-
         path_column = self.esm_ds.esmcat.assets.column_name
         paths = self.esm_ds.esmcat.df[path_column].tolist()
-        self.obsstore_registry, self.source_url_prefix = _resolve_store(
+        self.obstore_registry, self.source_url_prefix = _resolve_store(
             paths, self.store_options
         )
 
-        return self.obsstore_registry
+        return self.obstore_registry
 
     def _extract_datastore_structure(self) -> DataStoreStructure:
         """
@@ -330,7 +332,7 @@ class IcechunkStoreBuilder:
                     with open_virtual_mfdataset(
                         urls=file_paths,
                         parser=self.parser,
-                        registry=self.obsstore_registry,
+                        registry=self.obstore_registry,
                         parallel="dask",
                         decode_times=False,
                         coords="minimal",
@@ -364,7 +366,7 @@ class IcechunkStoreBuilder:
                         with open_virtual_dataset(
                             url=file_paths[0],
                             parser=self.parser,
-                            registry=self.obsstore_registry,
+                            registry=self.obstore_registry,
                             decode_times=False,
                         ) as vds:
                             vds.vz.to_icechunk(store, group=public_key)
