@@ -121,22 +121,22 @@ class IcechunkStoreBuilder:
         self,
         *,
         esm_datastore_path: Path | str,
-        store_path: Path | str,
+        icechunk_store_path: Path | str,
         esm_datastore_kwargs: dict | None = None,
         parser: VirtualizarrParser | None = None,
-        storage_options: dict | None = None,
-        store_options: dict | None = None,
+        icechunk_storage_options: dict | None = None,
+        icechunk_store_options: dict | None = None,
         drop_cols: list[str] | None = None,
         cols_to_deiter: list[str] | None = None,
     ):
         self.esm_datastore_path = str(esm_datastore_path)
         self.esm_datastore_kwargs = esm_datastore_kwargs or {}
 
-        self.store_path = str(store_path)
+        self.store_path = str(icechunk_store_path)
         self._esm_ds: esm_datastore | None = None
 
-        self.storage_options = storage_options or {}
-        self.store_options = store_options or {}
+        self.storage_options = icechunk_storage_options or {}
+        self.store_options = icechunk_store_options or {}
         self.drop_cols = drop_cols or []
         self.cols_to_deiter = cols_to_deiter or []
 

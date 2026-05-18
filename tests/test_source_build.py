@@ -77,7 +77,7 @@ class TestIcechunkStoreBuilder:
         dummy_store_path = tmpdir / "dummy_store.icechunk"
         builder = IcechunkStoreBuilder(
             esm_datastore_path=local_om2_datastore_path,
-            store_path=dummy_store_path,
+            icechunk_store_path=dummy_store_path,
             esm_datastore_kwargs=intake_esm_kwargs,
         )
 
@@ -96,7 +96,7 @@ class TestIcechunkStoreBuilder:
         builder = IcechunkStoreBuilder(
             esm_datastore_path=local_om2_datastore_path,
             esm_datastore_kwargs=intake_esm_kwargs,
-            store_path=dummy_store_path,
+            icechunk_store_path=dummy_store_path,
             parser=parser,
         )
 
@@ -126,7 +126,7 @@ class TestIcechunkStoreBuilder:
         builder = IcechunkStoreBuilder(
             esm_datastore_path=local_om2_datastore_path,
             esm_datastore_kwargs=intake_esm_kwargs,
-            store_path=dummy_store_path,
+            icechunk_store_path=dummy_store_path,
         )
         from intake_esm.cat import DataFormat
 
@@ -145,7 +145,7 @@ class TestIcechunkStoreBuilder:
         builder = IcechunkStoreBuilder(
             esm_datastore_path=local_om2_datastore_path,
             esm_datastore_kwargs=intake_esm_kwargs,
-            store_path=dummy_store_path,
+            icechunk_store_path=dummy_store_path,
         )
 
         builder.build()
@@ -169,7 +169,7 @@ class TestIcechunkStoreBuilder:
         dummy_store_path = tmpdir / "dummy_store.icechunk"
         builder = IcechunkStoreBuilder(
             esm_datastore_path=local_om2_datastore_path,
-            store_path=dummy_store_path,
+            icechunk_store_path=dummy_store_path,
             esm_datastore_kwargs=intake_esm_kwargs,
             parser=virtualizarr.parsers.ZarrParser,
         )
@@ -198,7 +198,7 @@ class TestIcechunkStoreBuilder:
         dummy_store_path = tmpdir / "dummy_store.icechunk"
         builder = IcechunkStoreBuilder(
             esm_datastore_path=local_om2_datastore_path,
-            store_path=dummy_store_path,
+            icechunk_store_path=dummy_store_path,
             esm_datastore_kwargs=intake_esm_kwargs,
         )
 
@@ -233,7 +233,7 @@ class TestIcechunkStoreBuilder:
         dummy_store_path = tmpdir / "dummy_store.icechunk"
         builder = IcechunkStoreBuilder(
             esm_datastore_path=local_om2_datastore_path,
-            store_path=dummy_store_path,
+            icechunk_store_path=dummy_store_path,
             esm_datastore_kwargs=intake_esm_kwargs,
         )
 
@@ -257,7 +257,7 @@ class TestIcechunkStoreBuilder:
         builder_2 = IcechunkStoreBuilder(
             esm_datastore_path=local_om2_datastore_path,
             esm_datastore_kwargs=intake_esm_kwargs,
-            store_path=dummy_store_path_2,
+            icechunk_store_path=dummy_store_path_2,
         )
 
         with patch(
@@ -280,7 +280,7 @@ class TestIcechunkStoreBuilder:
         dummy_store_path = tmpdir / "dummy_store.icechunk"
         builder = IcechunkStoreBuilder(
             esm_datastore_path=local_om2_datastore_path,
-            store_path=dummy_store_path,
+            icechunk_store_path=dummy_store_path,
             esm_datastore_kwargs=intake_esm_kwargs,
             cols_to_deiter=["variable_cell_methods"],
         )
@@ -304,7 +304,7 @@ class TestIcechunkStoreBuilder:
         builder = IcechunkStoreBuilder(
             esm_datastore_path=local_om2_datastore_path,
             esm_datastore_kwargs=intake_esm_kwargs,
-            store_path=dummy_store_path,
+            icechunk_store_path=dummy_store_path,
             cols_to_deiter=["start_date", "variable_standard_name"],
         )
 

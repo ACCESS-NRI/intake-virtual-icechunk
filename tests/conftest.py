@@ -84,7 +84,7 @@ def icechunk_store_path(esm_datastore_path, tmp_path_factory) -> Path:
 
     iscb = IcechunkStoreBuilder(
         esm_datastore_path=esm_datastore_path,
-        store_path=cat_path,
+        icechunk_store_path=cat_path,
         drop_cols=[
             "filename",
             # "path", # This should be droppped automatically...
