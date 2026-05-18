@@ -409,7 +409,6 @@ class IcechunkStoreBuilder:
         exploded catalog metadata take precedence over ``group_attrs`` so richer
         per-asset metadata is preserved where both sources provide a value.
         """
-
         group_df = group_df.drop(columns=self.drop_cols, errors="ignore")
 
         exploded_metadata: Mapping[str, list[Any] | None] = (

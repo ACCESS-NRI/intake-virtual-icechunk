@@ -71,11 +71,11 @@ class TestReadSidecarMetadata:
 class TestVirtualIcechunkCatalogModel:
     """Tests for JSON sidecar model loading, saving, and defaults."""
 
-    def test_save_creates_json(self, tmp_path, icechunk_store_path, sample_data):
-        fname = _intake_cat_filename(icechunk_store_path)
+    def test_save_creates_json(self, tmp_path, icechunk_localstore_path, sample_data):
+        fname = _intake_cat_filename(icechunk_localstore_path)
         url_prefix = f"file://{sample_data}/access-om2/"
 
-        model = VirtualIcechunkCatalogModel.load(str(icechunk_store_path / fname))
+        model = VirtualIcechunkCatalogModel.load(str(icechunk_localstore_path / fname))
 
         # Set a couple of fields to non-default values to check they round-trip correctly
         model.description = "My catalog"
@@ -84,11 +84,11 @@ class TestVirtualIcechunkCatalogModel:
 
         # Normalise fixture paths so the saved sidecar matches this checkout's
         # temporary test data location.
-        model.store = str(icechunk_store_path)
+        model.store = str(icechunk_localstore_path)
         model.virtual_chunk_model.url_prefix = url_prefix
 
         # Turn the path into a string for easier comparison in the JSON output
-        icechunk_store_path = str(icechunk_store_path)
+        icechunk_localstore_path = str(icechunk_localstore_path)
 
         from obstore.store import from_url as _obs_from_url
 
@@ -101,13 +101,13 @@ class TestVirtualIcechunkCatalogModel:
             data = json.load(f)
 
         assert data["id"] == "my-catalog"
-        assert data["store"] == icechunk_store_path
+        assert data["store"] == icechunk_localstore_path
         assert data["description"] == "My catalog"
         assert data["title"] == "Test"
         assert data["storage_options"] == {"key": "value"}
         assert data["last_updated"] is not None
 
-    def test_default_version(self, sample_data, icechunk_store_path):
+    def test_default_version(self, sample_data, icechunk_localstore_path):
         # Recreate the minimal virtual chunk config used by the fixture store.
         url_prefix = f"file://{sample_data}/access-om2/"
         vc_model_dict = {
@@ -118,7 +118,8 @@ class TestVirtualIcechunkCatalogModel:
 
         virtual_chunk_container = VirtualChunkContainerModel.from_dict(vc_model_dict)
         model = VirtualIcechunkCatalogModel(
-            store=str(icechunk_store_path), virtual_chunk_model=virtual_chunk_container
+            store=str(icechunk_localstore_path),
+            virtual_chunk_model=virtual_chunk_container,
         )
         assert model.version == "1.0.0"
 
@@ -159,7 +160,7 @@ class TestIcechunkCatalogFromJson:
 
     @pytest.fixture
     def temp_json_local_path(
-        self, icechunk_store_path, catalog_json_path, sample_data, tmpdir
+        self, icechunk_localstore_path, catalog_json_path, sample_data, tmpdir
     ) -> str:
         """
         Rewrite the fixture catalog JSON so paths point at this test run's
@@ -168,7 +169,7 @@ class TestIcechunkCatalogFromJson:
         with open(catalog_json_path) as f:
             data = json.load(f)
 
-        data["store"] = str(icechunk_store_path)
+        data["store"] = str(icechunk_localstore_path)
         data["virtual_chunk_model"]["url_prefix"] = f"file://{sample_data}/access-om2/"
 
         local_json_path = tmpdir / "catalog.json"
@@ -181,17 +182,19 @@ class TestIcechunkCatalogFromJson:
         cat = IcechunkCatalog.from_json(temp_json_local_path)
         assert isinstance(cat, IcechunkCatalog)
 
-    def test_from_json_store_matches(self, temp_json_local_path, icechunk_store_path):
+    def test_from_json_store_matches(
+        self, temp_json_local_path, icechunk_localstore_path
+    ):
         cat = IcechunkCatalog.from_json(temp_json_local_path)
-        assert cat.store == str(icechunk_store_path)
+        assert cat.store == str(icechunk_localstore_path)
 
     def test_from_json_preserves_catalog_id(
-        self, tmp_path, icechunk_store_path, sample_data
+        self, tmp_path, icechunk_localstore_path, sample_data
     ):
         """Regression: from_json() must not drop the catalog id stored in the JSON."""
         sidecar = {
             "id": "my-cat",
-            "store": str(icechunk_store_path),
+            "store": str(icechunk_localstore_path),
             "storage_options": {},
             "virtual_chunk_model": {
                 "url_prefix": f"file://{sample_data}/access-om2/",
@@ -204,13 +207,13 @@ class TestIcechunkCatalogFromJson:
         cat = IcechunkCatalog.from_json(str(json_path))
         assert cat._id == "my-cat"
 
-    def test_save_round_trip(self, tmp_path, icechunk_store_path):
-        cat = IcechunkCatalog(store=icechunk_store_path)
+    def test_save_round_trip(self, tmp_path, icechunk_localstore_path):
+        cat = IcechunkCatalog(store=icechunk_localstore_path)
         cat.save("saved-cat", directory=str(tmp_path))
         loaded = IcechunkCatalog.from_json(str(tmp_path / "saved-cat.json"))
-        assert loaded.store == str(icechunk_store_path)
+        assert loaded.store == str(icechunk_localstore_path)
 
-    def test_sidecar_round_trip_vcc_config(self, icechunk_store_path, sample_data):
+    def test_sidecar_round_trip_vcc_config(self, icechunk_localstore_path, sample_data):
         """
         Regression: the virtual chunk container config must survive a full
         sidecar round-trip (write → re-open catalog → read VCC).
@@ -221,12 +224,12 @@ class TestIcechunkCatalogFromJson:
         - VirtualChunkContainerModel serialises / deserialises intact
         """
         # Open catalog and record the original VCC config
-        cat = IcechunkCatalog(store=icechunk_store_path)
+        cat = IcechunkCatalog(store=icechunk_localstore_path)
         original_url_prefix = cat.virtual_chunk_model.url_prefix
         original_store_type = cat.virtual_chunk_model.store_type
 
         # Re-open from the store path (exercises __init__ sidecar read path)
-        cat2 = IcechunkCatalog(store=icechunk_store_path)
+        cat2 = IcechunkCatalog(store=icechunk_localstore_path)
         assert cat2.virtual_chunk_model.url_prefix == original_url_prefix
         assert cat2.virtual_chunk_model.store_type == original_store_type
 
@@ -235,16 +238,16 @@ class TestIcechunkCatalogFromJson:
         assert vcc.url_prefix == original_url_prefix
 
     def test_sidecar_options_no_sidecar_reread_when_model_supplied(
-        self, icechunk_store_path
+        self, icechunk_localstore_path
     ):
         """
         When virtual_chunk_model is supplied, __init__ skips the sidecar read.
         This means sidecar_options is irrelevant and the catalog still opens
         normally — even if sidecar_options would fail (e.g. wrong credentials).
         """
-        cat_base = IcechunkCatalog(store=icechunk_store_path)
+        cat_base = IcechunkCatalog(store=icechunk_localstore_path)
         cat = IcechunkCatalog(
-            store=icechunk_store_path,
+            store=icechunk_localstore_path,
             storage_options={"from_env": True},
             sidecar_options={"anon": True},  # would fail if sidecar were re-read
             virtual_chunk_model=cat_base.virtual_chunk_model.to_dict(),
@@ -262,34 +265,34 @@ class TestIcechunkCatalogConstructorKwargs:
     each wired to the correct constructor parameter with no cross-talk.
     """
 
-    def test_storage_options_kwarg_is_assigned(self, icechunk_store_path):
+    def test_storage_options_kwarg_is_assigned(self, icechunk_localstore_path):
         """Explicit storage_options kwarg must land on self.storage_options."""
         opts = {"from_env": True}
-        cat = IcechunkCatalog(store=icechunk_store_path, storage_options=opts)
+        cat = IcechunkCatalog(store=icechunk_localstore_path, storage_options=opts)
         assert cat.storage_options == opts
 
-    def test_xarray_kwargs_kwarg_is_assigned(self, icechunk_store_path):
+    def test_xarray_kwargs_kwarg_is_assigned(self, icechunk_localstore_path):
         """Explicit xarray_kwargs kwarg must land on self.xarray_kwargs."""
         xr_kw = {"decode_cf": False}
-        cat = IcechunkCatalog(store=icechunk_store_path, xarray_kwargs=xr_kw)
+        cat = IcechunkCatalog(store=icechunk_localstore_path, xarray_kwargs=xr_kw)
         assert cat.xarray_kwargs == xr_kw
 
     def test_storage_options_does_not_bleed_into_xarray_kwargs(
-        self, icechunk_store_path
+        self, icechunk_localstore_path
     ):
         """Passing storage_options must not overwrite xarray_kwargs."""
         opts = {"from_env": True}
-        cat = IcechunkCatalog(store=icechunk_store_path, storage_options=opts)
+        cat = IcechunkCatalog(store=icechunk_localstore_path, storage_options=opts)
         # xarray_kwargs should come from metadata (or default {}), not from opts
         assert cat.xarray_kwargs != opts
 
     def test_storage_options_does_not_bleed_into_virtual_chunk_model(
-        self, icechunk_store_path
+        self, icechunk_localstore_path
     ):
         """Passing storage_options must not overwrite virtual_chunk_model."""
         opts = {"from_env": True}
-        cat_with = IcechunkCatalog(store=icechunk_store_path, storage_options=opts)
-        cat_without = IcechunkCatalog(store=icechunk_store_path)
+        cat_with = IcechunkCatalog(store=icechunk_localstore_path, storage_options=opts)
+        cat_without = IcechunkCatalog(store=icechunk_localstore_path)
         # virtual_chunk_model should be identical regardless of storage_options
         assert (
             cat_with.virtual_chunk_model.url_prefix
@@ -297,18 +300,18 @@ class TestIcechunkCatalogConstructorKwargs:
         )
 
     def test_xarray_kwargs_does_not_bleed_into_storage_options(
-        self, icechunk_store_path
+        self, icechunk_localstore_path
     ):
         """Passing xarray_kwargs must not overwrite storage_options."""
         xr_kw = {"decode_cf": False}
-        cat = IcechunkCatalog(store=icechunk_store_path, xarray_kwargs=xr_kw)
+        cat = IcechunkCatalog(store=icechunk_localstore_path, xarray_kwargs=xr_kw)
         assert cat.storage_options != xr_kw
 
-    def test_defaults_fall_back_to_metadata(self, icechunk_store_path):
+    def test_defaults_fall_back_to_metadata(self, icechunk_localstore_path):
         """When no kwargs are provided, values come from the JSON metadata."""
-        cat_default = IcechunkCatalog(store=icechunk_store_path)
+        cat_default = IcechunkCatalog(store=icechunk_localstore_path)
         cat_explicit_none = IcechunkCatalog(
-            store=icechunk_store_path,
+            store=icechunk_localstore_path,
             storage_options=None,
             xarray_kwargs=None,
             virtual_chunk_model=None,
@@ -320,12 +323,12 @@ class TestIcechunkCatalogConstructorKwargs:
             == cat_explicit_none.virtual_chunk_model.url_prefix
         )
 
-    def test_all_three_kwargs_independent(self, icechunk_store_path):
+    def test_all_three_kwargs_independent(self, icechunk_localstore_path):
         """Each kwarg can be set independently without affecting the others."""
         opts = {"from_env": True}
         xr_kw = {"decode_cf": False}
-        cat_so = IcechunkCatalog(store=icechunk_store_path, storage_options=opts)
-        cat_xr = IcechunkCatalog(store=icechunk_store_path, xarray_kwargs=xr_kw)
+        cat_so = IcechunkCatalog(store=icechunk_localstore_path, storage_options=opts)
+        cat_xr = IcechunkCatalog(store=icechunk_localstore_path, xarray_kwargs=xr_kw)
 
         assert cat_so.storage_options == opts
         assert cat_so.xarray_kwargs != opts
@@ -340,21 +343,21 @@ class TestIcechunkCatalogKeys:
     def __init__(self, groups):
         self.all_keys = [g["key"] for g in groups]
 
-    def test_keys_returns_all_groups(self, icechunk_store_path):
-        cat = IcechunkCatalog(store=icechunk_store_path)
+    def test_keys_returns_all_groups(self, icechunk_localstore_path):
+        cat = IcechunkCatalog(store=icechunk_localstore_path)
         assert sorted(cat.keys()) == sorted(self.all_keys)
 
-    def test_len_matches_keys(self, icechunk_store_path):
-        cat = IcechunkCatalog(store=icechunk_store_path)
+    def test_len_matches_keys(self, icechunk_localstore_path):
+        cat = IcechunkCatalog(store=icechunk_localstore_path)
         assert len(cat) == len(self.all_keys)
 
-    def test_contains(self, icechunk_store_path):
-        cat = IcechunkCatalog(store=icechunk_store_path)
+    def test_contains(self, icechunk_localstore_path):
+        cat = IcechunkCatalog(store=icechunk_localstore_path)
         assert self.all_keys[0] in cat
         assert "NONEXISTENT.KEY" not in cat
 
-    def test_getitem_raises_on_missing_key(self, icechunk_store_path):
-        cat = IcechunkCatalog(store=icechunk_store_path)
+    def test_getitem_raises_on_missing_key(self, icechunk_localstore_path):
+        cat = IcechunkCatalog(store=icechunk_localstore_path)
         with pytest.raises(KeyError):
             cat["NONEXISTENT.KEY"]
 
@@ -365,24 +368,24 @@ class TestIcechunkCatalogSearch:
     remain valid regardless of which test store is used.
     """
 
-    def test_search_empty_query_returns_self(self, icechunk_store_path):
-        cat = IcechunkCatalog(store=icechunk_store_path)
+    def test_search_empty_query_returns_self(self, icechunk_localstore_path):
+        cat = IcechunkCatalog(store=icechunk_localstore_path)
         result = cat.search()
         assert result is cat
 
-    def test_search_unknown_column_returns_empty(self, icechunk_store_path):
-        cat = IcechunkCatalog(store=icechunk_store_path)
+    def test_search_unknown_column_returns_empty(self, icechunk_localstore_path):
+        cat = IcechunkCatalog(store=icechunk_localstore_path)
         result = cat.search(totally_nonexistent_column_xyz="whatever")
         assert result.keys() == []
 
-    def test_search_known_column_no_match_returns_empty(self, icechunk_store_path):
+    def test_search_known_column_no_match_returns_empty(self, icechunk_localstore_path):
         """Column exists but value is absent — must return empty, not all rows."""
-        cat = IcechunkCatalog(store=icechunk_store_path)
+        cat = IcechunkCatalog(store=icechunk_localstore_path)
         result = cat.search(filename="THIS_FILE_DOES_NOT_EXIST.nc")
         assert result.keys() == []
 
-    def test_search_scalar_match(self, icechunk_store_path):
-        cat = IcechunkCatalog(store=icechunk_store_path)
+    def test_search_scalar_match(self, icechunk_localstore_path):
+        cat = IcechunkCatalog(store=icechunk_localstore_path)
         df = cat.df
         filename_val = df["filename"].dropna().iloc[0]
         expected = sorted(df[df["filename"] == filename_val].index.tolist())
@@ -392,9 +395,9 @@ class TestIcechunkCatalogSearch:
         assert sorted(result.keys()) == expected
         assert len(result) > 0
 
-    def test_search_scalar_is_exact_not_substring(self, icechunk_store_path):
+    def test_search_scalar_is_exact_not_substring(self, icechunk_localstore_path):
         """Search must not return entries whose attribute only *contains* the query."""
-        cat = IcechunkCatalog(store=icechunk_store_path)
+        cat = IcechunkCatalog(store=icechunk_localstore_path)
         filename_val = cat.df["filename"].dropna().iloc[0]
         # A substring of a real filename should not match anything
         substring = filename_val[1:-1]  # strip first and last char
@@ -403,8 +406,8 @@ class TestIcechunkCatalogSearch:
             result.keys()
         ) == sorted(cat.df[cat.df["filename"] == substring].index.tolist())
 
-    def test_search_list_value(self, icechunk_store_path):
-        cat = IcechunkCatalog(store=icechunk_store_path)
+    def test_search_list_value(self, icechunk_localstore_path):
+        cat = IcechunkCatalog(store=icechunk_localstore_path)
         df = cat.df
         filenames = df["filename"].dropna().unique().tolist()[:2]
         expected = sorted(df[df["filename"].isin(filenames)].index.tolist())
@@ -413,9 +416,9 @@ class TestIcechunkCatalogSearch:
 
         assert sorted(result.keys()) == expected
 
-    def test_search_list_superset_of_scalar(self, icechunk_store_path):
+    def test_search_list_superset_of_scalar(self, icechunk_localstore_path):
         """search(x=[a, b]) should return at least as many results as search(x=a)."""
-        cat = IcechunkCatalog(store=icechunk_store_path)
+        cat = IcechunkCatalog(store=icechunk_localstore_path)
         filenames = cat.df["filename"].dropna().unique().tolist()
         if len(filenames) < 2:
             pytest.skip("Need at least 2 distinct filenames")
@@ -426,8 +429,8 @@ class TestIcechunkCatalogSearch:
 
         assert set(result_scalar.keys()).issubset(set(result_list.keys()))
 
-    def test_search_multi_attr(self, icechunk_store_path):
-        cat = IcechunkCatalog(store=icechunk_store_path)
+    def test_search_multi_attr(self, icechunk_localstore_path):
+        cat = IcechunkCatalog(store=icechunk_localstore_path)
         df = cat.df
         # Use only scalar (non-iterable) columns to avoid tuple/list mismatches
         scalar_cols = [
@@ -447,9 +450,9 @@ class TestIcechunkCatalogSearch:
 
         assert sorted(result.keys()) == expected
 
-    def test_search_multi_attr_is_intersection(self, icechunk_store_path):
+    def test_search_multi_attr_is_intersection(self, icechunk_localstore_path):
         """Multi-attr search must be AND, not OR."""
-        cat = IcechunkCatalog(store=icechunk_store_path)
+        cat = IcechunkCatalog(store=icechunk_localstore_path)
         df = cat.df
         scalar_cols = [
             c
@@ -471,25 +474,25 @@ class TestIcechunkCatalogSearch:
         assert set(result_both.keys()).issubset(set(result_col1_only.keys()))
         assert set(result_both.keys()).issubset(set(result_col2_only.keys()))
 
-    def test_search_result_is_icechunk_catalog(self, icechunk_store_path):
-        cat = IcechunkCatalog(store=icechunk_store_path)
+    def test_search_result_is_icechunk_catalog(self, icechunk_localstore_path):
+        cat = IcechunkCatalog(store=icechunk_localstore_path)
         result = cat.search(filename="ocean.nc")
         assert isinstance(result, IcechunkCatalog)
 
-    def test_search_result_keys_are_subset_of_parent(self, icechunk_store_path):
-        cat = IcechunkCatalog(store=icechunk_store_path)
+    def test_search_result_keys_are_subset_of_parent(self, icechunk_localstore_path):
+        cat = IcechunkCatalog(store=icechunk_localstore_path)
         result = cat.search(filename="ocean.nc")
         assert set(result.keys()).issubset(set(cat.keys()))
 
-    def test_search_result_shares_store(self, icechunk_store_path):
-        cat = IcechunkCatalog(store=icechunk_store_path)
+    def test_search_result_shares_store(self, icechunk_localstore_path):
+        cat = IcechunkCatalog(store=icechunk_localstore_path)
         _ = cat._zarr_store
         result = cat.search(filename="ocean.nc")
         assert result._open_zarr_store is cat._open_zarr_store
 
-    def test_search_chained_is_intersection(self, icechunk_store_path):
+    def test_search_chained_is_intersection(self, icechunk_localstore_path):
         """Chaining two searches should equal the AND of both queries at once."""
-        cat = IcechunkCatalog(store=icechunk_store_path)
+        cat = IcechunkCatalog(store=icechunk_localstore_path)
         df = cat.df
         scalar_cols = [
             c
@@ -508,9 +511,9 @@ class TestIcechunkCatalogSearch:
 
         assert sorted(chained.keys()) == sorted(combined.keys())
 
-    def test_search_df_reflects_results(self, icechunk_store_path):
+    def test_search_df_reflects_results(self, icechunk_localstore_path):
         """The .df on a search result should only contain matched entries."""
-        cat = IcechunkCatalog(store=icechunk_store_path)
+        cat = IcechunkCatalog(store=icechunk_localstore_path)
         filename_val = cat.df["filename"].dropna().iloc[0]
         result = cat.search(filename=filename_val)
         assert set(result.df.index.tolist()) == set(result.keys())
@@ -523,43 +526,43 @@ class TestIcechunkCatalogDf:
     def __init__(self, groups):
         self.all_keys = [g["key"] for g in groups]
 
-    def test_df_has_key_column(self, icechunk_store_path):
-        cat = IcechunkCatalog(store=icechunk_store_path)
+    def test_df_has_key_column(self, icechunk_localstore_path):
+        cat = IcechunkCatalog(store=icechunk_localstore_path)
         df = cat.df
         assert "key" in df.columns
 
-    def test_df_has_attr_columns(self, icechunk_store_path):
-        cat = IcechunkCatalog(store=icechunk_store_path)
+    def test_df_has_attr_columns(self, icechunk_localstore_path):
+        cat = IcechunkCatalog(store=icechunk_localstore_path)
         df = cat.df
         assert "source_id" in df.columns
         assert "experiment_id" in df.columns
 
-    def test_df_row_count(self, icechunk_store_path):
-        cat = IcechunkCatalog(store=icechunk_store_path)
+    def test_df_row_count(self, icechunk_localstore_path):
+        cat = IcechunkCatalog(store=icechunk_localstore_path)
         assert len(cat.df) == len(self.all_keys)
 
-    def test_df_keys_match(self, icechunk_store_path):
-        cat = IcechunkCatalog(store=icechunk_store_path)
+    def test_df_keys_match(self, icechunk_localstore_path):
+        cat = IcechunkCatalog(store=icechunk_localstore_path)
         assert sorted(cat.df["key"].tolist()) == sorted(self.all_keys)
 
-    def test_df_filtered_by_search(self, icechunk_store_path):
-        cat = IcechunkCatalog(store=icechunk_store_path)
+    def test_df_filtered_by_search(self, icechunk_localstore_path):
+        cat = IcechunkCatalog(store=icechunk_localstore_path)
         result = cat.search(source_id="BCC-ESM1")
         df = result.df
         assert all(df["source_id"] == "BCC-ESM1")
 
 
 class TestIcechunkCatalogToDatasetDict:
-    def test_returns_dict_of_datasets(self, icechunk_store_path):
-        cat = IcechunkCatalog(store=icechunk_store_path)
+    def test_returns_dict_of_datasets(self, icechunk_localstore_path):
+        cat = IcechunkCatalog(store=icechunk_localstore_path)
         result = cat.search(filename="ocean.nc").to_dataset_dict(progressbar=False)
         assert isinstance(result, dict)
         assert len(result) > 0
         for ds in result.values():
             assert isinstance(ds, xr.Dataset)
 
-    def test_preprocess_applied_to_each_dataset(self, icechunk_store_path):
-        cat = IcechunkCatalog(store=icechunk_store_path)
+    def test_preprocess_applied_to_each_dataset(self, icechunk_localstore_path):
+        cat = IcechunkCatalog(store=icechunk_localstore_path)
 
         def mark(ds):
             return ds.assign_attrs(preprocessed=True)
@@ -571,23 +574,25 @@ class TestIcechunkCatalogToDatasetDict:
         for ds in result.values():
             assert ds.attrs.get("preprocessed") is True
 
-    def test_preprocess_none_does_not_alter_datasets(self, icechunk_store_path):
-        cat = IcechunkCatalog(store=icechunk_store_path)
+    def test_preprocess_none_does_not_alter_datasets(self, icechunk_localstore_path):
+        cat = IcechunkCatalog(store=icechunk_localstore_path)
         without = cat.search(filename="ocean.nc").to_dataset_dict(progressbar=False)
         with_none = cat.search(filename="ocean.nc").to_dataset_dict(
             preprocess=None, progressbar=False
         )
         assert set(without.keys()) == set(with_none.keys())
 
-    def test_storage_options_merged_does_not_break_loading(self, icechunk_store_path):
-        cat = IcechunkCatalog(store=icechunk_store_path)
+    def test_storage_options_merged_does_not_break_loading(
+        self, icechunk_localstore_path
+    ):
+        cat = IcechunkCatalog(store=icechunk_localstore_path)
         result = cat.search(filename="ocean.nc").to_dataset_dict(
             storage_options={"extra_key": "extra_value"}, progressbar=False
         )
         assert len(result) > 0
 
-    def test_xarray_kwargs_override_catalog_kwargs(self, icechunk_store_path):
-        cat = IcechunkCatalog(store=icechunk_store_path)
+    def test_xarray_kwargs_override_catalog_kwargs(self, icechunk_localstore_path):
+        cat = IcechunkCatalog(store=icechunk_localstore_path)
         result = cat.search(filename="ocean.nc").to_dataset_dict(
             xarray_kwargs={"mask_and_scale": False}, progressbar=False
         )
@@ -599,17 +604,17 @@ class TestIcechunkCatalogToDatasetDict:
 class TestIcechunkCatalogToXarray:
     """Tests for single-entry conversion and deprecated to_dask compatibility."""
 
-    def test_to_xarray_returns_dataset(self, icechunk_store_path):
-        cat = IcechunkCatalog(store=icechunk_store_path)
+    def test_to_xarray_returns_dataset(self, icechunk_localstore_path):
+        cat = IcechunkCatalog(store=icechunk_localstore_path)
         ds = cat.search(filename="ocean.nc").to_dask()
         assert isinstance(ds, xr.Dataset)
 
-    def test_to_xarray_raises_on_missing_key(self, icechunk_store_path):
-        cat = IcechunkCatalog(store=icechunk_store_path)
+    def test_to_xarray_raises_on_missing_key(self, icechunk_localstore_path):
+        cat = IcechunkCatalog(store=icechunk_localstore_path)
         with pytest.raises(KeyError):
             cat["NONEXISTENT.KEY"].to_xarray()
 
-    def test_to_dask_warns(self, icechunk_store_path):
+    def test_to_dask_warns(self, icechunk_localstore_path):
         import sys
 
         if sys.version_info < (3, 13):
@@ -619,7 +624,7 @@ class TestIcechunkCatalogToXarray:
             pytest.xfail("to_dask() is deprecated and raises in Python 3.13+")
             return None
 
-        cat = IcechunkCatalog(store=icechunk_store_path)
+        cat = IcechunkCatalog(store=icechunk_localstore_path)
         with pytest.warns(
             # FutureWarning,
             match=r"to_dask\(\) is deprecated; use to_xarray\(\) instead\.",
@@ -630,14 +635,14 @@ class TestIcechunkCatalogToXarray:
 class TestIcechunkCatalog:
     """Miscellaneous catalog behavior tests."""
 
-    def test_nunique(self, icechunk_store_path):
-        cat = IcechunkCatalog(store=icechunk_store_path)
+    def test_nunique(self, icechunk_localstore_path):
+        cat = IcechunkCatalog(store=icechunk_localstore_path)
         uniques = cat.nunique()
 
         assert uniques.to_dict() == {
-            "Variable": 7,
-            "Coordinates": 10,
-            "Dimensions": 9,
+            "variable": 7,
+            "coordinates": 10,
+            "dimensions": 9,
             "filename": 5,
             "title": 2,
             "grid_type": 2,
@@ -666,12 +671,12 @@ class TestIcechunkCatalog:
         }
 
     @pytest.mark.xfail(reason="The HTML repr test is flaky in current CI.")
-    def test_repr_html(self, icechunk_store_path):
-        cat = IcechunkCatalog(store=icechunk_store_path)
+    def test_repr_html(self, icechunk_localstore_path):
+        cat = IcechunkCatalog(store=icechunk_localstore_path)
         html = cat._repr_html_()
         assert (
             html
-            == '<p><strong>_intake_icecat catalog with 6 dataset(s) from 6 asset(s)</strong>:</p> <div>\n<style scoped>\n    .dataframe tbody tr th:only-of-type {\n        vertical-align: middle;\n    }\n\n    .dataframe tbody tr th {\n        vertical-align: top;\n    }\n\n    .dataframe thead th {\n        text-align: right;\n    }\n</style>\n<table border="1" class="dataframe">\n  <thead>\n    <tr style="text-align: right;">\n      <th></th>\n      <th>0</th>\n    </tr>\n  </thead>\n  <tbody>\n    <tr>\n      <th>Variable</th>\n      <td>7</td>\n    </tr>\n    <tr>\n      <th>Coordinates</th>\n      <td>10</td>\n    </tr>\n    <tr>\n      <th>Dimensions</th>\n      <td>9</td>\n    </tr>\n    <tr>\n      <th>filename</th>\n      <td>5</td>\n    </tr>\n    <tr>\n      <th>title</th>\n      <td>2</td>\n    </tr>\n    <tr>\n      <th>grid_type</th>\n      <td>2</td>\n    </tr>\n    <tr>\n      <th>grid_tile</th>\n      <td>2</td>\n    </tr>\n    <tr>\n      <th>history</th>\n      <td>6</td>\n    </tr>\n    <tr>\n      <th>NCO</th>\n      <td>1</td>\n    </tr>\n    <tr>\n      <th>frequency</th>\n      <td>3</td>\n    </tr>\n    <tr>\n      <th>variable_long_name</th>\n      <td>6</td>\n    </tr>\n    <tr>\n      <th>variable_standard_name</th>\n      <td>6</td>\n    </tr>\n    <tr>\n      <th>variable_cell_methods</th>\n      <td>6</td>\n    </tr>\n    <tr>\n      <th>variable_units</th>\n      <td>6</td>\n    </tr>\n    <tr>\n      <th>realm</th>\n      <td>2</td>\n    </tr>\n    <tr>\n      <th>contents</th>\n      <td>2</td>\n    </tr>\n    <tr>\n      <th>source</th>\n      <td>2</td>\n    </tr>\n    <tr>\n      <th>comment</th>\n      <td>2</td>\n    </tr>\n    <tr>\n      <th>comment2</th>\n      <td>2</td>\n    </tr>\n    <tr>\n      <th>comment3</th>\n      <td>2</td>\n    </tr>\n    <tr>\n      <th>conventions</th>\n      <td>2</td>\n    </tr>\n    <tr>\n      <th>io_flavor</th>\n      <td>2</td>\n    </tr>\n  </tbody>\n</table>\n</div>'
+            == '<p><strong>_intake_icecat catalog with 6 dataset(s) from 6 asset(s)</strong>:</p> <div>\n<style scoped>\n    .dataframe tbody tr th:only-of-type {\n        vertical-align: middle;\n    }\n\n    .dataframe tbody tr th {\n        vertical-align: top;\n    }\n\n    .dataframe thead th {\n        text-align: right;\n    }\n</style>\n<table border="1" class="dataframe">\n  <thead>\n    <tr style="text-align: right;">\n      <th></th>\n      <th>0</th>\n    </tr>\n  </thead>\n  <tbody>\n    <tr>\n      <th>variable</th>\n      <td>7</td>\n    </tr>\n    <tr>\n      <th>coordinates</th>\n      <td>10</td>\n    </tr>\n    <tr>\n      <th>dimensions</th>\n      <td>9</td>\n    </tr>\n    <tr>\n      <th>filename</th>\n      <td>5</td>\n    </tr>\n    <tr>\n      <th>title</th>\n      <td>2</td>\n    </tr>\n    <tr>\n      <th>grid_type</th>\n      <td>2</td>\n    </tr>\n    <tr>\n      <th>grid_tile</th>\n      <td>2</td>\n    </tr>\n    <tr>\n      <th>history</th>\n      <td>6</td>\n    </tr>\n    <tr>\n      <th>NCO</th>\n      <td>1</td>\n    </tr>\n    <tr>\n      <th>frequency</th>\n      <td>3</td>\n    </tr>\n    <tr>\n      <th>variable_long_name</th>\n      <td>6</td>\n    </tr>\n    <tr>\n      <th>variable_standard_name</th>\n      <td>6</td>\n    </tr>\n    <tr>\n      <th>variable_cell_methods</th>\n      <td>6</td>\n    </tr>\n    <tr>\n      <th>variable_units</th>\n      <td>6</td>\n    </tr>\n    <tr>\n      <th>realm</th>\n      <td>2</td>\n    </tr>\n    <tr>\n      <th>contents</th>\n      <td>2</td>\n    </tr>\n    <tr>\n      <th>source</th>\n      <td>2</td>\n    </tr>\n    <tr>\n      <th>comment</th>\n      <td>2</td>\n    </tr>\n    <tr>\n      <th>comment2</th>\n      <td>2</td>\n    </tr>\n    <tr>\n      <th>comment3</th>\n      <td>2</td>\n    </tr>\n    <tr>\n      <th>conventions</th>\n      <td>2</td>\n    </tr>\n    <tr>\n      <th>io_flavor</th>\n      <td>2</td>\n    </tr>\n  </tbody>\n</table>\n</div>'
         )
 
 

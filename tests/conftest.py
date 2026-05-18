@@ -73,7 +73,7 @@ def esm_datastore_path(sample_data, tmp_path_factory) -> Path:
 
 
 @pytest.fixture(scope="session")
-def icechunk_store_path(esm_datastore_path, tmp_path_factory) -> Path:
+def icechunk_localstore_path(esm_datastore_path, tmp_path_factory) -> Path:
     """
     Use a minimal icechunk store for testing. This needs to be rebuilt at the
     start of each test session, or virtualizarr will complain about manifests not
@@ -101,9 +101,9 @@ def icechunk_store_path(esm_datastore_path, tmp_path_factory) -> Path:
 
 
 @pytest.fixture
-def catalog_json_path(icechunk_store_path) -> Path:
+def catalog_json_path(icechunk_localstore_path) -> Path:
     from intake_virtual_icechunk.utils import _intake_cat_filename
 
-    fname = _intake_cat_filename(icechunk_store_path)
+    fname = _intake_cat_filename(icechunk_localstore_path)
 
-    return icechunk_store_path / fname
+    return icechunk_localstore_path / fname

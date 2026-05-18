@@ -291,7 +291,7 @@ class TestIcechunkStoreBuilder:
         cat = intake.open_virtual_icechunk(str(dummy_store_path))
 
         assert "variable_cell_methods" in cat.df.columns
-        assert cat.df.loc["ocean.fx.xt_ocean:1.yt_ocean:1.point"].Variable is None
+        assert cat.df.loc["ocean.fx.xt_ocean:1.yt_ocean:1.point"].variable is None
 
     def test_repr_defaults(self, local_om2_datastore_path, intake_esm_kwargs, tmpdir):
         """
