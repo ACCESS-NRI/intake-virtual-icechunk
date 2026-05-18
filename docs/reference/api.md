@@ -17,32 +17,29 @@
 
 The following API summary is auto-generated.
 
-```{autoclass} intake_virtual_icechunk.core.IcechunkCatalog
-:members:
-:noindex:
-:special-members: __init__
-```
+```{eval-rst}
+.. autoclass:: intake_virtual_icechunk.core.IcechunkCatalog
+   :members:
+   :noindex:
+   :special-members: __init__
 
-```{autoclass} intake_virtual_icechunk._source.IcechunkDataSource
-:members:
-:noindex:
-:special-members: __init__
-```
+.. autoclass:: intake_virtual_icechunk._source.IcechunkDataSource
+   :members:
+   :noindex:
+   :special-members: __init__
 
-```{autoclass} intake_virtual_icechunk.cat.VirtualIcechunkCatalogModel
-:members:
-:noindex:
-:special-members: __init__
-```
+.. autoclass:: intake_virtual_icechunk.cat.VirtualIcechunkCatalogModel
+   :members:
+   :noindex:
+   :special-members: __init__
 
-```{autoclass} intake_virtual_icechunk.source._build.IcechunkStoreBuilder
-:members:
-:noindex:
-:special-members: __init__
-```
+.. autoclass:: intake_virtual_icechunk.source._build.IcechunkStoreBuilder
+   :members:
+   :noindex:
+   :special-members: __init__
 
-```{autoclass} intake_virtual_icechunk.source._containers.VirtualChunkContainerModel
-:members:
-:noindex:
-:special-members: __init__
+.. autoclass:: intake_virtual_icechunk.source._containers.VirtualChunkContainerModel
+   :members:
+   :noindex:
+   :special-members: __init__
 ```
