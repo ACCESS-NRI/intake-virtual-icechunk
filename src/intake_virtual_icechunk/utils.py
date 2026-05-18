@@ -3,6 +3,7 @@ Copyright 2026 ACCESS-NRI and contributors. See the top-level COPYRIGHT file for
 SPDX-License-Identifier: Apache-2.0
 """
 
+import copy
 import os
 import posixpath
 from pathlib import Path
@@ -123,11 +124,17 @@ def _resolve_store(
 
     bucket = parsed.netloc
 
+    # Remove icechunk specific options. We don't want users to have to configure
+    # extra crap, so just do it internally here - should be a relatively short
+    # enumeration given it's configuration arguments we're trying to filter out,
+    # not arbitrary user options.
+    obstore_config = _filter_config_args(store_options)
+
     if scheme == "s3":
         url_prefix = f"s3://{bucket}/"
         store = S3Store.from_url(  # type: ignore[assignment]
             url_prefix,
-            config=store_options,
+            config=obstore_config,
         )
         return ObjectStoreRegistry({url_prefix: store}), url_prefix
     elif scheme in ("gs", "gcs"):
@@ -136,7 +143,7 @@ def _resolve_store(
         )
         store = GCSStore.from_url(
             f"{bucket}",
-            config=store_options,
+            config=obstore_config,
         )
     elif scheme in ("az", "abfs"):
         raise NotImplementedError(
@@ -156,7 +163,15 @@ def _resolve_store(
 
 
 _VCC_SAFE_KWARGS: frozenset[str] = frozenset(
-    {"endpoint_url", "endpoint", "allow_http", "region"}
+    {
+        "endpoint_url",
+        "endpoint",
+        "allow_http",
+        "region",
+        "s3_compatible",
+        "force_path_style",
+        "anonymous",
+    }
 )
 """
 The set of keyword-argument names from ``store_options`` that are safe to
@@ -252,7 +267,6 @@ def _resolve_vcc_store(url_prefix: str, store_options: dict) -> Any:
     icechunk.ObjectStoreConfig
     """
 
-    breakpoint()
     safe_opts = {k: v for k, v in store_options.items() if k in _VCC_SAFE_KWARGS}
 
     parsed = urlparse(url_prefix)
@@ -263,7 +277,7 @@ def _resolve_vcc_store(url_prefix: str, store_options: dict) -> Any:
         return icechunk.local_filesystem_store(path)
 
     elif scheme == "s3":
-        return icechunk.s3_store(url_prefix, **safe_opts)
+        return icechunk.s3_store(**safe_opts)
 
     elif scheme in ("gs", "gcs"):
         raise NotImplementedError(
@@ -281,3 +295,21 @@ def _resolve_vcc_store(url_prefix: str, store_options: dict) -> Any:
         f"Unsupported URL prefix scheme: {scheme!r}. "
         "Expected a local path, file://, or s3://."
     )
+
+
+def _filter_config_args(store_options: dict) -> dict:
+    """
+    Filter out storage options that are specific to icechunk so that they aren't
+    passed to obstore.
+    """
+
+    obstore_opts = copy.deepcopy(store_options)
+
+    icechunk_specific_keys = {"s3_compatible", "force_path_style", "anonymous"}
+
+    if "endpoint_url" in obstore_opts:
+        obstore_opts["endpoint"] = obstore_opts.pop("endpoint_url", None)
+
+    obstore_opts["skip_signature"] = obstore_opts.pop("anonymous", False)
+
+    return {k: v for k, v in obstore_opts.items() if k not in icechunk_specific_keys}
