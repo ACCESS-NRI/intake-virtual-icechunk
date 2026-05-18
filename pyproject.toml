@@ -75,6 +75,29 @@ omit = [
 name = "intake-virtual-icechunk"
 channels = ["conda-forge", "accessnri"]
 platforms = ["osx-arm64", "linux-64"]
+preview = ["pixi-build"]
+
+[tool.pixi.package]
+name = "intake-virtual-icechunk"
+version = "0.0.11.dev1"
+
+[tool.pixi.package.build.backend]
+name = "pixi-build-python"
+version = "*"
+channels = [
+    "https://prefix.dev/pixi-build-backends",
+    "https://prefix.dev/conda-forge",
+]
+
+[tool.pixi.package.build]
+config = { ignore-pypi-mapping = false, env = { SETUPTOOLS_SCM_PRETEND_VERSION_FOR_INTAKE_VIRTUAL_ICECHUNK = "0.0.11.dev1" } }
+
+[tool.pixi.package.host-dependencies]
+setuptools = ">=61.0.0"
+setuptools-scm = "*"
+
+[tool.pixi.package.run-dependencies]
+obspec_utils = "*"
 
 [tool.pixi.dependencies]
 intake-esm = "*"

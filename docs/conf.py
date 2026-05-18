@@ -38,7 +38,6 @@ numpydoc_class_members_toctree = False
 master_doc = "index"
 
 source_suffix = {
-    ".rst": "restructuredtext",
     ".md": "myst-nb",
     ".ipynb": "myst-nb",
 }
