@@ -501,10 +501,10 @@ class IcechunkCatalog(Catalog):
             ).to_xarray()
             row: dict = {"key": key}
             row.update(
-                {"Variable": tuple(_df.data_vars) or None}
+                {"variable": tuple(_df.data_vars) or None}
             )  # grid files might be none - better that than an empty list which is more likely to cause confusion
-            row.update({"Coordinates": tuple(_df.coords)})
-            row.update({"Dimensions": tuple(_df.dims)})
+            row.update({"coordinates": tuple(_df.coords)})
+            row.update({"dimensions": tuple(_df.dims)})
 
             keys = [k.lower() for k in row.keys()]
             attrs = {
