@@ -228,14 +228,13 @@ class IcechunkStoreBuilder:
 
         We also cache the registry on the builder instance.
         """
-
         path_column = self.esm_ds.esmcat.assets.column_name
         paths = self.esm_ds.esmcat.df[path_column].tolist()
-        self.obsstore_registry, self.source_url_prefix = _resolve_store(
+        self.obstore_registry, self.source_url_prefix = _resolve_store(
             paths, self.store_options
         )
 
-        return self.obsstore_registry
+        return self.obstore_registry
 
     def _extract_datastore_structure(self) -> DataStoreStructure:
         """
@@ -329,7 +328,7 @@ class IcechunkStoreBuilder:
                     with open_virtual_mfdataset(
                         urls=file_paths,
                         parser=self.parser,
-                        registry=self.obsstore_registry,
+                        registry=self.obstore_registry,
                         parallel="dask",
                         decode_times=False,
                         coords="minimal",
@@ -363,7 +362,7 @@ class IcechunkStoreBuilder:
                         with open_virtual_dataset(
                             url=file_paths[0],
                             parser=self.parser,
-                            registry=self.obsstore_registry,
+                            registry=self.obstore_registry,
                             decode_times=False,
                         ) as vds:
                             vds.vz.to_icechunk(store, group=public_key)

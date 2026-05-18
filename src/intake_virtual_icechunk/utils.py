@@ -107,7 +107,7 @@ def _resolve_store(
     parsed = urlparse(paths[0])
     scheme = parsed.scheme
 
-    if scheme in ("", "file") or (len(scheme) == 1 and scheme.isalpha()):
+    if scheme in ("", "file"):
         # Normalise all paths to bare POSIX paths so commonpath works uniformly.
         local_paths = [
             urlparse(p).path if urlparse(p).scheme == "file" else os.path.abspath(p)
@@ -126,10 +126,8 @@ def _resolve_store(
     if scheme == "s3":
         url_prefix = f"s3://{bucket}/"
         store = S3Store.from_url(  # type: ignore[assignment]
-            f"{bucket}",
-            endpoint=store_options.get("endpoint", None),
-            access_key_id=store_options.get("access_key_id", None),
-            secret_access_key=store_options.get("secret_access_key", None),
+            url_prefix,
+            config=store_options,
         )
         return ObjectStoreRegistry({url_prefix: store}), url_prefix
     elif scheme in ("gs", "gcs"):
@@ -138,9 +136,7 @@ def _resolve_store(
         )
         store = GCSStore.from_url(
             f"{bucket}",
-            endpoint=store_options.get("endpoint", None),
-            access_key_id=store_options.get("access_key_id", None),
-            secret_access_key=store_options.get("secret_access_key", None),
+            config=store_options,
         )
     elif scheme in ("az", "abfs"):
         raise NotImplementedError(
@@ -148,10 +144,7 @@ def _resolve_store(
         )
         return AzureStore.from_url(
             f"{bucket}",
-            account=store_options.get("account", None),
-            endpoint=store_options.get("endpoint", None),
-            access_key_id=store_options.get("access_key_id", None),
-            secret_access_key=store_options.get("secret_access_key", None),
+            config=store_options,
         )
 
     return ObjectStoreRegistry({f"{bucket}": store})
@@ -258,6 +251,8 @@ def _resolve_vcc_store(url_prefix: str, store_options: dict) -> Any:
     -------
     icechunk.ObjectStoreConfig
     """
+
+    breakpoint()
     safe_opts = {k: v for k, v in store_options.items() if k in _VCC_SAFE_KWARGS}
 
     parsed = urlparse(url_prefix)
