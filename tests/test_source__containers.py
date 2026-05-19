@@ -163,3 +163,66 @@ class TestLocalFilesystemStore(StoreTests):
         expected_object_store_config = icechunk.local_filesystem_store(sample_prefix)
 
         assert object_store_config == expected_object_store_config
+
+
+@pytest.mark.xfail(
+    reason="This is still a complete mess and all the super() methods raise NotImplementedError"
+)
+class TestCephStore(StoreTests):
+    @pytest.fixture(scope="class")
+    def canonical_vc_container(
+        self, icechunk_cephstore_info
+    ) -> icechunk.VirtualChunkContainer:
+        return icechunk.VirtualChunkContainer(
+            url_prefix=icechunk_cephstore_info,
+            store=icechunk.s3_store(
+                icechunk_cephstore_info,
+                endpoint_url="https://projects.pawsey.org.au",
+                force_path_style=True,
+                anonymous=True,
+            ),
+        )
+
+    def test_roundtrip(self, icechunk_cephstore_info):
+        config = icechunk.RepositoryConfig.default()
+
+        config.set_virtual_chunk_container(
+            icechunk.VirtualChunkContainer(
+                url_prefix=icechunk_cephstore_info,
+                store=icechunk.s3_store(
+                    icechunk_cephstore_info,
+                    endpoint_url="https://projects.pawsey.org.au",
+                    force_path_style=True,
+                    anonymous=True,
+                ),
+            )
+        )
+
+        vc_container = config.get_virtual_chunk_container(icechunk_cephstore_info)
+
+        config_model = VirtualChunkContainerModel.from_virtual_chunk_container(
+            vc_container
+        )
+
+        reconst_vc_container = config_model.to_virtual_chunk_container()
+
+        # Probably redundant to do both assertions here, but just to be on the safe side
+        for attr in ["url_prefix", "name", "store"]:
+            assert getattr(vc_container, attr) == getattr(reconst_vc_container, attr)
+
+        assert reconst_vc_container == vc_container
+
+    def test_from_virtual_chunk_container(self, *args, **kwargs):
+        return super().test_from_virtual_chunk_container(*args, **kwargs)
+
+    def test_to_virtual_chunk_container(self, *args, **kwargs):
+        return super().test_to_virtual_chunk_container(*args, **kwargs)
+
+    def test__build_object_store_config(self, *args, **kwargs):
+        return super().test__build_object_store_config(*args, **kwargs)
+
+    def test_to_dict(self, *args, **kwargs):
+        return super().test_to_dict(*args, **kwargs)
+
+    def test_from_dict(self, *args, **kwargs):
+        return super().test_from_dict(*args, **kwargs)
