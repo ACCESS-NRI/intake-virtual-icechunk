@@ -111,7 +111,6 @@ class CephStoreInfo:
 
 @pytest.fixture(scope="session")
 def icechunk_cephstore_info() -> Generator[CephStoreInfo, None, None]:
-
     hash_suffix = uuid.uuid4().hex
 
     ESM_DATASTORE_OPTS = {
