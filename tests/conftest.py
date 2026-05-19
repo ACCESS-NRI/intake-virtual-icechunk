@@ -155,7 +155,7 @@ def icechunk_cephstore_info() -> Generator[CephStoreInfo, None, None]:
 
     We'll do this via obstore for consistency with everything else, but we'll need
     creds to do anything useful here. These will also be in the repo, and we'll have
-    a periodic cleanup job running on the bucket to make sure it doesn't get too 
+    a periodic cleanup job running on the bucket to make sure it doesn't get too
     cluttered with old test stores.
     """
     import os
