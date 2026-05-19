@@ -110,6 +110,7 @@ python-dotenv = ">=1.2.2,<2"
 [tool.pixi.feature.dev.tasks]
 setup-ipykernel = {cmd= "python -m ipykernel install --user --name=intake-virtual-icechunk-dev", description = "Set up the ipykernel for the dev environment"}
 test-coverage = { cmd = "pytest tests/ --cov=intake_virtual_icechunk --cov-report=html --cov-report=term", description = "Run tests locally with coverage and open the HTML report" }
+clean-ceph-store = { cmd = "python scripts/clean_ceph_store.py", description = "Clean the ceph store of test data" }
 
 [tool.pixi.feature.docs.pypi-dependencies]
 intake_virtual_icechunk = { path = ".", editable = true }
