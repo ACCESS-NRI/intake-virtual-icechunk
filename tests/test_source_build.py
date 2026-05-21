@@ -59,7 +59,7 @@ class BuilderTests:
     def test_init_with_parser(self, *args, **kwargs):
         """
         Initialisation with a parser should use the provided parser not instantiate
-        the esm åtastore until it's asked for
+        the esm datastore until it's asked for
         """
         raise NotImplementedError("Base test, to be implemented by child classes")
 
