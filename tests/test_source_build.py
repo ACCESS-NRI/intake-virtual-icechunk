@@ -532,6 +532,12 @@ class TestIcechunkCephStoreBuilder(BuilderTests):
             access_key = os.getenv("CEPH_ACCESS_KEY_ID")
             secret_key = os.getenv("CEPH_SECRET_ACCESS_KEY")
 
+            if not access_key or not secret_key:
+                print(
+                    "Skipping Ceph cleanup because CEPH_ACCESS_KEY_ID/CEPH_SECRET_ACCESS_KEY are not configured"
+                )
+                return
+
             s3_store: ObjectStore = from_url(
                 bucket_base_url,
                 config={
@@ -836,15 +842,17 @@ class TestIcechunkCephStoreBuilder(BuilderTests):
             load_dotenv()
             access_key = os.getenv("CEPH_ACCESS_KEY_ID")
             secret_key = os.getenv("CEPH_SECRET_ACCESS_KEY")
-            cleanup_store: ObjectStore = from_url(
-                bucket_base_url,
-                config={
-                    "endpoint_url": "https://projects.pawsey.org.au",
-                    "access_key_id": access_key,
-                    "secret_access_key": secret_key,
-                },
-            )
-            cleanup_store.delete(f"icecat-{second_hash}")
+
+            if access_key and secret_key:
+                cleanup_store: ObjectStore = from_url(
+                    bucket_base_url,
+                    config={
+                        "endpoint_url": "https://projects.pawsey.org.au",
+                        "access_key_id": access_key,
+                        "secret_access_key": secret_key,
+                    },
+                )
+                cleanup_store.delete(f"icecat-{second_hash}")
 
     def test_build_deiters_cols_existing(
         self,
@@ -876,6 +884,45 @@ class TestIcechunkCephStoreBuilder(BuilderTests):
 
         assert "variable_cell_methods" in cat.df.columns
         assert cat.df.loc["ocean.fx.xt_ocean:1.yt_ocean:1.point"].variable is None
+
+    def test_build_roundtrip_reads_dataset(
+        self,
+        esm_datastore_path,
+        esm_datastore_kwargs,
+        icecat_store_tmp_url,
+        icechunk_store_opts,
+        icechunk_storage_opts,
+    ):
+        """Build a Ceph-backed catalog, reopen it, and read real data back."""
+        builder = IcechunkStoreBuilder(
+            esm_datastore_path=esm_datastore_path,
+            esm_datastore_kwargs=esm_datastore_kwargs,
+            icechunk_store_path=icecat_store_tmp_url,
+            icechunk_store_options=icechunk_store_opts,
+            icechunk_storage_options=icechunk_storage_opts,
+        )
+
+        builder.build()
+
+        cat = intake.open_virtual_icechunk(
+            icecat_store_tmp_url, storage_options=icechunk_storage_opts
+        )
+
+        assert len(cat.df) > 0
+        assert len(cat.keys()) > 0
+
+        for key in cat.keys():
+            ds = cat[key].to_xarray()
+            if not ds.data_vars:
+                continue
+
+            var_name = next(iter(ds.data_vars))
+            sample = ds[var_name].isel({dim: 0 for dim in ds[var_name].dims}).load()
+
+            assert sample.size == 1
+            return
+
+        pytest.fail("Ceph-backed catalog opened, but no data variables were readable")
 
     def test_repr_defaults(
         self,
