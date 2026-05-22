@@ -52,7 +52,7 @@ class VirtualIcechunkCatalogModel(pydantic.BaseModel):
     id: str = ""
     version: pydantic.StrictStr = "1.0.0"
     store: pydantic.StrictStr
-    virtual_chunk_model: VirtualChunkContainerModel
+    virtual_chunk_model: VirtualChunkContainerModel | None = None
     description: pydantic.StrictStr | None = None
     title: pydantic.StrictStr | None = None
     last_updated: datetime.datetime | datetime.date | None = None

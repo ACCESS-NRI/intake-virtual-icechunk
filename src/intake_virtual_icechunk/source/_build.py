@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import abc
 from collections.abc import Mapping
 
 # Copyright 2026 ACCESS-NRI and contributors. See the top-level COPYRIGHT file for details.
@@ -12,6 +13,7 @@ import icechunk
 import intake
 import pandas as pd
 import polars as pl
+import xarray as xr
 import zarr
 from intake_esm.core import esm_datastore
 from intake_esm.utils import MinimalExploder
@@ -70,7 +72,147 @@ class DataStoreStructure:
     assets_col: str
 
 
-class IcechunkStoreBuilder:
+class IcechunkStoreBuilder(abc.ABC):
+    """Abstract base class for building Icechunk stores from intake-esm catalogs.
+
+    Concrete subclasses implement :meth:`build` to choose *how* source data
+    lands in the store:
+
+    * :class:`VirtualIcechunkStoreBuilder` — creates virtual references via
+      VirtualiZarr; source data is never moved.
+    * :class:`ZarrIcechunkStoreBuilder` — copies real data chunks into the
+      Icechunk store via ``xarray.open_mfdataset`` + ``Dataset.to_zarr``.
+
+    Subclasses share catalogue discovery, metadata attachment, and sidecar
+    serialisation logic defined here.
+
+    Parameters
+    ----------
+    esm_datastore_path : Path or str
+        Path to an existing intake-esm catalog JSON file. Stored internally as
+        a string.
+    icechunk_store_path : Path or str
+        Path or URI at which to create the Icechunk store. Supported schemes:
+        local path, ``s3://``, ``gs://`` / ``gcs://``, ``az://``.
+    esm_datastore_kwargs : dict, optional
+        Keyword arguments forwarded to ``intake.open_esm_datastore``.
+    icechunk_storage_options : dict, optional
+        Keyword arguments forwarded to the Icechunk storage backend for the
+        target store. See :func:`intake_virtual_icechunk.utils._resolve_storage`.
+    drop_cols : list[str], optional
+        Column names in the intake-esm catalog's assets dataframe to omit from
+        attached Zarr group metadata. The asset path column is always omitted.
+    cols_to_deiter : list[str], optional
+        Columns whose deduplicated iterable metadata should be stored as a
+        scalar by taking the first value.
+    """
+
+    def __init__(
+        self,
+        *,
+        esm_datastore_path: Path | str,
+        icechunk_store_path: Path | str,
+        esm_datastore_kwargs: dict | None = None,
+        icechunk_storage_options: dict | None = None,
+        drop_cols: list[str] | None = None,
+        cols_to_deiter: list[str] | None = None,
+    ):
+        self.esm_datastore_path = str(esm_datastore_path)
+        self.esm_datastore_kwargs = esm_datastore_kwargs or {}
+
+        self.store_path = str(icechunk_store_path)
+        self._esm_ds: esm_datastore | None = None
+
+        self.storage_options = icechunk_storage_options or {}
+        self.drop_cols = drop_cols or []
+        self.cols_to_deiter = cols_to_deiter or []
+
+    @property
+    def esm_ds(self) -> esm_datastore:
+        """Lazily open and cache the intake-esm datastore."""
+
+        if self._esm_ds is None:
+            self._esm_ds = intake.open_esm_datastore(
+                self.esm_datastore_path, **self.esm_datastore_kwargs
+            )
+        return self._esm_ds
+
+    def _extract_datastore_structure(self) -> DataStoreStructure:
+        """
+        Grab the groupby_attrs and assets column name from the intake-esm catalog,
+        which we use to build the icechunk store and populate .zattrs.
+        We need these for both the build process and to populate the catalog metadata.
+        """
+        esmcat = self.esm_ds.esmcat
+        agg_control = esmcat.aggregation_control
+        groupby_attrs = (
+            agg_control.groupby_attrs if agg_control else list(esmcat.df.columns)
+        )
+        assets_col = esmcat.assets.column_name
+        return DataStoreStructure(groupby_attrs, assets_col)
+
+    @abc.abstractmethod
+    def build(self) -> None:
+        """Build the Icechunk store from the intake-esm catalog."""
+        ...
+
+    def _attach_catalog_metadata(
+        self,
+        zarr_group: zarr.Group,
+        group_df: pd.DataFrame,
+        group_attrs: dict,
+    ) -> None:
+        """
+        Attach searchable intake-esm metadata to a Zarr group.
+
+        Metadata is deduplicated per group, optional columns are dropped, and
+        configured iterable columns are collapsed to scalars. Values from the
+        exploded catalog metadata take precedence over ``group_attrs`` so richer
+        per-asset metadata is preserved where both sources provide a value.
+        """
+        group_df = group_df.drop(columns=self.drop_cols, errors="ignore")
+
+        exploded_metadata: Mapping[str, list[Any] | None] = (
+            MinimalExploder(pl.from_pandas(group_df))()
+            .unique()
+            .to_dict(as_series=False)
+        )
+
+        # No None type until we deiter columns
+        exploded_metadata = {
+            k: [val for val in set(v) if val]  # type: ignore[arg-type]
+            for k, v in exploded_metadata.items()
+        }
+
+        for col in self.cols_to_deiter:
+            try:
+                exploded_metadata[col] = exploded_metadata.get(col, [None])[0]  # type: ignore[index]
+            except IndexError:
+                exploded_metadata[col] = None
+
+        exploded_metadata = {
+            k: v for k, v in exploded_metadata.items() if k not in self.drop_cols
+        }
+
+        # Do exploded metadata first so it takes precedence over the groupby attrs,
+        # which are more likely to have unimportant comments from NCO, etc.
+        # TODO: Figure out if we can keep the order stable?
+
+        group_attrs = {
+            k: v
+            for k, v in group_attrs.items()
+            if k not in exploded_metadata and k not in self.drop_cols
+        }
+
+        zarr_group.attrs.update(exploded_metadata)
+        zarr_group.attrs.update(group_attrs)
+
+        for column in group_df.columns:
+            if column not in zarr_group.attrs:
+                zarr_group.attrs[column] = group_df[column].iloc[0]
+
+
+class VirtualIcechunkStoreBuilder(IcechunkStoreBuilder):
     """Build a virtual Icechunk store from an existing intake-esm datastore.
 
     Given a pre-built intake-esm catalog, this builder iterates over every
@@ -87,10 +229,6 @@ class IcechunkStoreBuilder:
     After the store is built, a lightweight JSON sidecar is written into the
     store directory so the catalog can be re-opened from the store path or with
     :meth:`~intake_virtual_icechunk.core.IcechunkCatalog.from_json`.
-
-    Icechunk session, store, and branch management is handled internally so
-    callers only need to supply the intake-esm catalog path and target Icechunk
-    store path.
 
     ``icechunk_storage_options`` configures the target Icechunk store.
     ``icechunk_store_options`` configures access to the source data referenced
@@ -138,24 +276,22 @@ class IcechunkStoreBuilder:
         drop_cols: list[str] | None = None,
         cols_to_deiter: list[str] | None = None,
     ):
-        self.esm_datastore_path = str(esm_datastore_path)
-        self.esm_datastore_kwargs = esm_datastore_kwargs or {}
-
-        self.store_path = str(icechunk_store_path)
-        self._esm_ds: esm_datastore | None = None
-
-        self.storage_options = icechunk_storage_options or {}
+        super().__init__(
+            esm_datastore_path=esm_datastore_path,
+            icechunk_store_path=icechunk_store_path,
+            esm_datastore_kwargs=esm_datastore_kwargs,
+            icechunk_storage_options=icechunk_storage_options,
+            drop_cols=drop_cols,
+            cols_to_deiter=cols_to_deiter,
+        )
         self.store_options = icechunk_store_options or {}
-        self.drop_cols = drop_cols or []
-        self.cols_to_deiter = cols_to_deiter or []
-
         parser = parser or self._infer_parser()
         self.parser = parser()
 
     def __repr__(self) -> str:
         """Return a multiline representation showing the builder configuration."""
         return (
-            "IcechunkStoreBuilder("
+            "VirtualIcechunkStoreBuilder("
             f"\n\tesm_datastore_path='{self.esm_datastore_path}', "
             f"\n\ticechunk_store_path='{self.store_path}', "
             f"\n\tparser={self.parser.__class__.__name__}, "
@@ -165,16 +301,6 @@ class IcechunkStoreBuilder:
             f"\n\tcols_to_deiter={self.cols_to_deiter}"
             "\n)"
         )
-
-    @property
-    def esm_ds(self) -> esm_datastore:
-        """Lazily open and cache the intake-esm datastore."""
-
-        if self._esm_ds is None:
-            self._esm_ds = intake.open_esm_datastore(
-                self.esm_datastore_path, **self.esm_datastore_kwargs
-            )
-        return self._esm_ds
 
     def _infer_parser(self) -> VirtualizarrParser:
         """
@@ -239,22 +365,8 @@ class IcechunkStoreBuilder:
 
         return self.obstore_registry
 
-    def _extract_datastore_structure(self) -> DataStoreStructure:
-        """
-        Grab the groupby_attrs and assets column name from the intake-esm catalog,
-        which we use to build the icechunk store and populate .zattrs.
-        We need these for both the build process and to populate the catalog metadata,
-        """
-        esmcat = self.esm_ds.esmcat
-        agg_control = esmcat.aggregation_control
-        groupby_attrs = (
-            agg_control.groupby_attrs if agg_control else list(esmcat.df.columns)
-        )
-        assets_col = esmcat.assets.column_name
-        return DataStoreStructure(groupby_attrs, assets_col)
-
     def build(self) -> None:
-        """Build the Icechunk store.
+        """Build the virtual Icechunk store.
 
         For each dataset group in the intake-esm catalog:
 
@@ -395,57 +507,149 @@ class IcechunkStoreBuilder:
         )
         model.save(sidecar_fname, store=sidecar_store)
 
-    def _attach_catalog_metadata(
+
+class ZarrIcechunkStoreBuilder(IcechunkStoreBuilder):
+    """Build a real Icechunk store by copying data from an intake-esm datastore.
+
+    Given a pre-built intake-esm catalog, this builder iterates over every
+    dataset group in the catalog, opens the constituent files with
+    ``xarray.open_mfdataset``, and writes each dataset as a named Zarr
+    *group* inside a single Icechunk store. Data chunks are **copied** into
+    the Icechunk store, so source files do not need to remain accessible once
+    the build is complete.
+
+    The resulting store requires no virtual chunk container configuration: it
+    can be opened with :class:`~intake_virtual_icechunk.core.IcechunkCatalog`
+    directly, without supplying any source-data credentials.
+
+    Parameters
+    ----------
+    esm_datastore_path : Path or str
+        Path to an existing intake-esm catalog JSON file. Stored internally as
+        a string.
+    icechunk_store_path : Path or str
+        Path or URI at which to create the Icechunk store. Supported schemes:
+        local path, ``s3://``, ``gs://`` / ``gcs://``, ``az://``.
+    esm_datastore_kwargs : dict, optional
+        Keyword arguments forwarded to ``intake.open_esm_datastore``.
+    icechunk_storage_options : dict, optional
+        Keyword arguments forwarded to the Icechunk storage backend for the
+        target store. See :func:`intake_virtual_icechunk.utils._resolve_storage`.
+    xarray_kwargs : dict, optional
+        Keyword arguments forwarded to ``xarray.open_mfdataset`` when reading
+        each group's source files (e.g. ``{'decode_times': False}``).
+    drop_cols : list[str], optional
+        Column names in the intake-esm catalog's assets dataframe to omit from
+        attached Zarr group metadata. The asset path column is always omitted.
+    cols_to_deiter : list[str], optional
+        Columns whose deduplicated iterable metadata should be stored as a
+        scalar by taking the first value.
+    """
+
+    def __init__(
         self,
-        zarr_group: zarr.Group,
-        group_df: pd.DataFrame,
-        group_attrs: dict,
-    ) -> None:
-        """
-        Attach searchable intake-esm metadata to a Zarr group.
+        *,
+        esm_datastore_path: Path | str,
+        icechunk_store_path: Path | str,
+        esm_datastore_kwargs: dict | None = None,
+        icechunk_storage_options: dict | None = None,
+        xarray_kwargs: dict | None = None,
+        drop_cols: list[str] | None = None,
+        cols_to_deiter: list[str] | None = None,
+    ):
+        super().__init__(
+            esm_datastore_path=esm_datastore_path,
+            icechunk_store_path=icechunk_store_path,
+            esm_datastore_kwargs=esm_datastore_kwargs,
+            icechunk_storage_options=icechunk_storage_options,
+            drop_cols=drop_cols,
+            cols_to_deiter=cols_to_deiter,
+        )
+        self.xarray_kwargs = xarray_kwargs or {}
 
-        Metadata is deduplicated per group, optional columns are dropped, and
-        configured iterable columns are collapsed to scalars. Values from the
-        exploded catalog metadata take precedence over ``group_attrs`` so richer
-        per-asset metadata is preserved where both sources provide a value.
-        """
-        group_df = group_df.drop(columns=self.drop_cols, errors="ignore")
-
-        exploded_metadata: Mapping[str, list[Any] | None] = (
-            MinimalExploder(pl.from_pandas(group_df))()
-            .unique()
-            .to_dict(as_series=False)
+    def __repr__(self) -> str:
+        """Return a multiline representation showing the builder configuration."""
+        return (
+            "ZarrIcechunkStoreBuilder("
+            f"\n\tesm_datastore_path='{self.esm_datastore_path}', "
+            f"\n\ticechunk_store_path='{self.store_path}', "
+            f"\n\txarray_kwargs={self.xarray_kwargs}, "
+            f"\n\tstorage_options={self.storage_options}, "
+            f"\n\tdrop_cols={self.drop_cols}, "
+            f"\n\tcols_to_deiter={self.cols_to_deiter}"
+            "\n)"
         )
 
-        # No None type until we deiter columns
-        exploded_metadata = {
-            k: [val for val in set(v) if val]  # type: ignore[arg-type]
-            for k, v in exploded_metadata.items()
-        }
+    def build(self) -> None:
+        """Build the Icechunk store by copying real data from the source assets.
 
-        for col in self.cols_to_deiter:
-            try:
-                exploded_metadata[col] = exploded_metadata.get(col, [None])[0]  # type: ignore[index]
-            except IndexError:
-                exploded_metadata[col] = None
+        For each dataset group in the intake-esm catalog:
 
-        exploded_metadata = {
-            k: v for k, v in exploded_metadata.items() if k not in self.drop_cols
-        }
+        1. Collects the asset file paths that belong to the group.
+        2. Opens the files with ``xarray.open_mfdataset``.
+        3. Writes the dataset as a named Zarr group in the Icechunk store.
+        4. Writes the group's ``groupby_attrs`` values into ``.zattrs``.
 
-        # Do exploded metadata first so it takes precedence over the groupby attrs,
-        # which are more likely to have unimportant comments from NCO, etc.
-        # TODO: Figure out if we can keep the order stable?
+        After all groups are written, a JSON sidecar is saved alongside the
+        store for use with
+        :meth:`~intake_virtual_icechunk.core.IcechunkCatalog.from_json`.
+        The sidecar does **not** contain a virtual chunk container entry
+        because the store holds real data chunks.
+        """
+        from intake_virtual_icechunk.cat import VirtualIcechunkCatalogModel
 
-        group_attrs = {
-            k: v
-            for k, v in group_attrs.items()
-            if k not in exploded_metadata and k not in self.drop_cols
-        }
+        esmcat = self.esm_ds.esmcat
+        groupby_attrs, assets_col = astuple(self._extract_datastore_structure())
 
-        zarr_group.attrs.update(exploded_metadata)
-        zarr_group.attrs.update(group_attrs)
+        _drop_cols = list(set(self.drop_cols + [assets_col]))
+        self.drop_cols = _drop_cols
 
-        for column in group_df.columns:
-            if column not in zarr_group.attrs:
-                zarr_group.attrs[column] = group_df[column].iloc[0]
+        storage = _resolve_storage(self.store_path, self.storage_options)
+
+        config = icechunk.RepositoryConfig.default()
+        repo = icechunk.Repository.create(storage, config)
+        repo.save_config()
+
+        group_key_map = esmcat._construct_group_keys()
+        self.failed_list: list[tuple[str, Exception]] = []
+
+        with repo.transaction(
+            "main", message=f"Build Icechunk catalog for {self.esm_ds.name}"
+        ) as store:
+            for public_key, internal_key in group_key_map.items():
+                grouped = esmcat.grouped
+                group_df: pd.DataFrame = grouped.get_group(internal_key)
+
+                # Collect group-level metadata for .zattrs
+                group_attrs: dict = {}
+                for attr in groupby_attrs:
+                    if attr in group_df.columns:
+                        group_attrs[attr] = group_df[attr].iloc[0]
+                # Collect asset file paths for this group
+                file_paths: list[str] = group_df[assets_col].tolist()
+
+                try:
+                    ds = xr.open_mfdataset(file_paths, **self.xarray_kwargs)
+                    ds.to_zarr(store, group=public_key, mode="a")
+
+                    zarr_group = zarr.open_group(store, path=public_key, mode="a")
+                    self._attach_catalog_metadata(zarr_group, group_df, group_attrs)
+
+                    print(f"Wrote group {public_key} successfully!")
+                except Exception as e:
+                    self.failed_list.append((public_key, e))
+                    print(f"Failed to write group {public_key}: {e}")
+
+        # Write the JSON sidecar inside the store directory
+        sidecar_fname = _intake_cat_filename(self.store_path)
+
+        model = VirtualIcechunkCatalogModel(
+            store=self.store_path,
+            storage_options=self.storage_options,
+            virtual_chunk_model=None,
+        )
+        sidecar_store: ObjectStore = _obs_from_url(
+            _path_to_url(self.store_path),
+            config=_filter_config_args(self.storage_options),
+        )
+        model.save(sidecar_fname, store=sidecar_store)

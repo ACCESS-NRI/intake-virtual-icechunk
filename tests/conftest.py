@@ -9,7 +9,7 @@ client = Client(threads_per_worker=1)
 
 import pytest
 
-from intake_virtual_icechunk.source import IcechunkStoreBuilder
+from intake_virtual_icechunk.source import VirtualIcechunkStoreBuilder
 
 
 @pytest.fixture(scope="session")
@@ -82,7 +82,7 @@ def icechunk_localstore_path(esm_datastore_path, tmp_path_factory) -> Path:
 
     cat_path = tmp_path_factory.mktemp("access-om2") / "icecat.icechunk"
 
-    iscb = IcechunkStoreBuilder(
+    iscb = VirtualIcechunkStoreBuilder(
         esm_datastore_path=esm_datastore_path,
         icechunk_store_path=cat_path,
         drop_cols=[

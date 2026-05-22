@@ -159,7 +159,7 @@ class IcechunkCatalog(Catalog):
             )
             self.xarray_kwargs = xarray_kwargs or metadata.get("xarray_kwargs", {})
             self.virtual_chunk_model = VirtualChunkContainerModel.from_dict(
-                metadata.get("virtual_chunk_model", {})
+                metadata.get("virtual_chunk_model")
             )
             self._id = metadata.get("id", None)
         else:
@@ -176,6 +176,8 @@ class IcechunkCatalog(Catalog):
 
         self.virtual_chunk_container = (
             self.virtual_chunk_model.to_virtual_chunk_container()
+            if self.virtual_chunk_model is not None
+            else None
         )
 
         self._entries: dict[str, IcechunkDataSource] = {}
@@ -200,14 +202,16 @@ class IcechunkCatalog(Catalog):
 
             storage = _resolve_storage(self.store, self.storage_options)
 
-            credentials = icechunk.containers_credentials(
-                {self.virtual_chunk_model.url_prefix: None}
-            )
-
-            self._open_repo = icechunk.Repository.open(
-                storage,
-                authorize_virtual_chunk_access=credentials,
-            )
+            if self.virtual_chunk_container is not None:
+                credentials = icechunk.containers_credentials(
+                    {self.virtual_chunk_model.url_prefix: None}
+                )
+                self._open_repo = icechunk.Repository.open(
+                    storage,
+                    authorize_virtual_chunk_access=credentials,
+                )
+            else:
+                self._open_repo = icechunk.Repository.open(storage)
         return self._open_repo
 
     @property
@@ -237,7 +241,11 @@ class IcechunkCatalog(Catalog):
             store=parent.store,
             storage_options=parent.storage_options,
             xarray_kwargs=parent.xarray_kwargs,
-            virtual_chunk_model=parent.virtual_chunk_model.to_dict(),
+            virtual_chunk_model=(
+                parent.virtual_chunk_model.to_dict()
+                if parent.virtual_chunk_model is not None
+                else None
+            ),
         )
         # Preserve parent metadata that is not re-read from the sidecar when
         # virtual_chunk_model is supplied (see __init__ branching logic).
@@ -280,7 +288,11 @@ class IcechunkCatalog(Catalog):
             store=model.store,
             storage_options=model.storage_options,
             xarray_kwargs=xarray_kwargs or {},
-            virtual_chunk_model=model.virtual_chunk_model.to_dict(),
+            virtual_chunk_model=(
+                model.virtual_chunk_model.to_dict()
+                if model.virtual_chunk_model is not None
+                else None
+            ),
             catalog_id=model.id or None,
         )
 

@@ -104,8 +104,11 @@ class VirtualChunkContainerModel:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: dict) -> VirtualChunkContainerModel:
+    def from_dict(cls, d: dict | None) -> VirtualChunkContainerModel | None:
         """
         Create a VirtualChunkContainerModel from a dictionary (e.g. from JSON).
+        Returns ``None`` if *d* is ``None``.
         """
+        if d is None:
+            return None
         return cls(**d)
