@@ -22,6 +22,7 @@ from intake_virtual_icechunk.source import (
     IcechunkStoreBuilder,
     VirtualIcechunkStoreBuilder,
 )
+from intake_virtual_icechunk.source._build import GroupEntry
 from intake_virtual_icechunk.utils import _intake_cat_filename
 
 __all__ = ["VirtualIcechunkStoreBuilder", "pytest"]
@@ -251,6 +252,29 @@ class TestVirtualIcechunkStoreBuilder(BuilderTests):
         inferred_parser = builder._infer_parser()
 
         assert inferred_parser == parser
+
+    def test_iter_esm_groups(self, local_om2_datastore_path, intake_esm_kwargs, tmpdir):
+        """The shared ESM iterator should yield one structured entry per catalog key."""
+        dummy_store_path = tmpdir / "dummy_store.icechunk"
+        builder = VirtualIcechunkStoreBuilder(
+            esm_datastore_path=local_om2_datastore_path,
+            esm_datastore_kwargs=intake_esm_kwargs,
+            icechunk_store_path=dummy_store_path,
+        )
+
+        entries = list(builder._iter_esm_groups())
+
+        assert entries
+        assert len(entries) == len(builder.esm_ds.keys())
+        assert all(isinstance(entry, GroupEntry) for entry in entries)
+        assert {entry.public_key for entry in entries} == set(builder.esm_ds.keys())
+        assert builder.esm_ds.esmcat.assets.column_name in builder.drop_cols
+        assert all(not entry.group_df.empty for entry in entries)
+        assert all(entry.file_paths for entry in entries)
+        assert all(
+            set(entry.group_attrs).issubset(set(entry.group_df.columns))
+            for entry in entries
+        )
 
     def test_clean_build(self, local_om2_datastore_path, intake_esm_kwargs, tmpdir):
         """

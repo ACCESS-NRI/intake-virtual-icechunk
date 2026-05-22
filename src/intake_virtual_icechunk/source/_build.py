@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import abc
-from collections.abc import Mapping
+from collections.abc import Generator, Mapping
 
 # Copyright 2026 ACCESS-NRI and contributors. See the top-level COPYRIGHT file for details.
 # SPDX-License-Identifier: Apache-2.0
-from dataclasses import astuple, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -71,6 +71,14 @@ class ParserInferenceError(IcechunkBuildError):
 class DataStoreStructure:
     groupby_attrs: list[str]
     assets_col: str
+
+
+@dataclass
+class GroupEntry:
+    public_key: str
+    group_df: pd.DataFrame
+    group_attrs: dict[str, Any]
+    file_paths: list[str]
 
 
 class AbstractIcechunkStoreBuilder(abc.ABC):
@@ -151,6 +159,36 @@ class AbstractIcechunkStoreBuilder(abc.ABC):
         )
         assets_col = esmcat.assets.column_name
         return DataStoreStructure(groupby_attrs, assets_col)
+
+    def _prepare_group_iteration(self) -> DataStoreStructure:
+        """Prepare the builder for iterating over intake-esm dataset groups."""
+
+        structure = self._extract_datastore_structure()
+        self.drop_cols = list(set(self.drop_cols + [structure.assets_col]))
+        return structure
+
+    def _iter_esm_groups(self) -> Generator[GroupEntry, None, None]:
+        """Yield one logical dataset-group entry from the intake-esm catalog."""
+
+        esmcat = self.esm_ds.esmcat
+        structure = self._prepare_group_iteration()
+        grouped = esmcat.grouped
+
+        for public_key, internal_key in esmcat._construct_group_keys().items():
+            group_df: pd.DataFrame = grouped.get_group(internal_key)
+            group_attrs = {
+                attr: group_df[attr].iloc[0]
+                for attr in structure.groupby_attrs
+                if attr in group_df.columns
+            }
+            file_paths: list[str] = group_df[structure.assets_col].tolist()
+
+            yield GroupEntry(
+                public_key=public_key,
+                group_df=group_df,
+                group_attrs=group_attrs,
+                file_paths=file_paths,
+            )
 
     @abc.abstractmethod
     def build(self) -> None:
@@ -388,11 +426,6 @@ class VirtualIcechunkStoreBuilder(AbstractIcechunkStoreBuilder):
         """
         from intake_virtual_icechunk.cat import VirtualIcechunkCatalogModel
 
-        esmcat = self.esm_ds.esmcat
-        groupby_attrs, assets_col = astuple(self._extract_datastore_structure())
-
-        _drop_cols = list(set(self.drop_cols + [assets_col]))
-        self.drop_cols = _drop_cols
         # Resolve registry first so self.source_url_prefix is available for the
         # VirtualChunkContainer config below.
         self._create_registry()
@@ -422,26 +455,15 @@ class VirtualIcechunkStoreBuilder(AbstractIcechunkStoreBuilder):
         # ------------------------------------------------------------------
         # 3. Build each group inside a single transaction
         # ------------------------------------------------------------------
-        group_key_map = esmcat._construct_group_keys()
         self.failed_list: list[tuple[str, Exception]] = []
 
         with repo.transaction(
             "main", message=f"Build Virtual Icechunk catalog for {self.esm_ds.name}"
         ) as store:
-            for public_key, internal_key in group_key_map.items():
-                grouped = esmcat.grouped
-                group_df: pd.DataFrame = grouped.get_group(internal_key)
-
-                # Collect group-level metadata for .zattrs
-                group_attrs: dict = {}
-                for attr in groupby_attrs:
-                    if attr in group_df.columns:
-                        group_attrs[attr] = group_df[attr].iloc[0]
-                # Collect asset file paths for this group
-                file_paths: list[str] = group_df[assets_col].tolist()
+            for entry in self._iter_esm_groups():
                 try:
                     with open_virtual_mfdataset(
-                        urls=file_paths,
+                        urls=entry.file_paths,
                         parser=self.parser,
                         registry=self.obstore_registry,
                         parallel="dask",
@@ -449,7 +471,7 @@ class VirtualIcechunkStoreBuilder(AbstractIcechunkStoreBuilder):
                         coords="minimal",
                         compat="override",
                     ) as vds:
-                        vds.vz.to_icechunk(store, group=public_key)
+                        vds.vz.to_icechunk(store, group=entry.public_key)
 
                     # Write group metadata into .zattrs so the catalog can search
                     # these groups without opening the arrays.
@@ -460,41 +482,43 @@ class VirtualIcechunkStoreBuilder(AbstractIcechunkStoreBuilder):
 
                     # To keep life simple, we'll just attach everything, and then
                     # compute variables, coordinates, dimensions etc. on the fly later
-                    zarr_group = zarr.open_group(store, path=public_key, mode="a")
+                    zarr_group = zarr.open_group(store, path=entry.public_key, mode="a")
                     # Would make more sense to merge group_attrs and esm_ds_metadata
                     # first in a sensible way
-                    self._attach_catalog_metadata(zarr_group, group_df, group_attrs)
+                    self._attach_catalog_metadata(
+                        zarr_group, entry.group_df, entry.group_attrs
+                    )
 
-                    print(f"Virtualised group {public_key} successfully!")
+                    print(f"Virtualised group {entry.public_key} successfully!")
                 except Exception as e:
                     if (
                         "Could not find any dimension coordinates to use to order the Dataset objects for concatenation"
                         not in str(e)
                     ):
-                        self.failed_list.append((public_key, e))
-                        print(f"Failed to virtualise group {public_key}: {e}")
+                        self.failed_list.append((entry.public_key, e))
+                        print(f"Failed to virtualise group {entry.public_key}: {e}")
                     else:
                         try:
                             with open_virtual_dataset(
-                                url=file_paths[0],
+                                url=entry.file_paths[0],
                                 parser=self.parser,
                                 registry=self.obstore_registry,
                                 decode_times=False,
                             ) as vds:
-                                vds.vz.to_icechunk(store, group=public_key)
+                                vds.vz.to_icechunk(store, group=entry.public_key)
                             # Write group metadata into .zattrs so the catalog can search
                             # these groups without opening the arrays.
                             zarr_group = zarr.open_group(
-                                store, path=public_key, mode="a"
+                                store, path=entry.public_key, mode="a"
                             )
                             self._attach_catalog_metadata(
-                                zarr_group, group_df, group_attrs
+                                zarr_group, entry.group_df, entry.group_attrs
                             )
 
-                            print(f"Virtualised group {public_key} successfully!")
+                            print(f"Virtualised group {entry.public_key} successfully!")
                         except Exception as e:
-                            self.failed_list.append((public_key, e))
-                            print(f"Failed to virtualise group {public_key}: {e}")
+                            self.failed_list.append((entry.public_key, e))
+                            print(f"Failed to virtualise group {entry.public_key}: {e}")
 
         # Write the JSON sidecar inside the store directory
         sidecar_fname = _intake_cat_filename(self.store_path)
@@ -604,51 +628,37 @@ class IcechunkStoreBuilder(AbstractIcechunkStoreBuilder):
         """
         from intake_virtual_icechunk.cat import VirtualIcechunkCatalogModel
 
-        esmcat = self.esm_ds.esmcat
-        groupby_attrs, assets_col = astuple(self._extract_datastore_structure())
-
-        _drop_cols = list(set(self.drop_cols + [assets_col]))
-        self.drop_cols = _drop_cols
-
         storage = _resolve_storage(self.store_path, self.storage_options)
 
         config = icechunk.RepositoryConfig.default()
         repo = icechunk.Repository.create(storage, config)
         repo.save_config()
 
-        group_key_map = esmcat._construct_group_keys()
         self.failed_list: list[tuple[str, Exception]] = []
 
         with repo.transaction(
             "main", message=f"Build Icechunk catalog for {self.esm_ds.name}"
         ) as store:
-            for public_key, internal_key in group_key_map.items():
-                grouped = esmcat.grouped
-                group_df: pd.DataFrame = grouped.get_group(internal_key)
-
-                # Collect group-level metadata for .zattrs
-                group_attrs: dict = {}
-                for attr in groupby_attrs:
-                    if attr in group_df.columns:
-                        group_attrs[attr] = group_df[attr].iloc[0]
-                # Collect asset file paths for this group
-                file_paths: list[str] = group_df[assets_col].tolist()
-
+            for entry in self._iter_esm_groups():
                 try:
-                    with xr.open_mfdataset(file_paths, **self.xarray_kwargs) as ds:
-                        to_icechunk(ds, store.session, group=public_key, mode="a")
+                    with xr.open_mfdataset(
+                        entry.file_paths, **self.xarray_kwargs
+                    ) as ds:
+                        to_icechunk(ds, store.session, group=entry.public_key, mode="a")
 
-                    zarr_group = zarr.open_group(store, path=public_key, mode="a")
-                    self._attach_catalog_metadata(zarr_group, group_df, group_attrs)
+                    zarr_group = zarr.open_group(store, path=entry.public_key, mode="a")
+                    self._attach_catalog_metadata(
+                        zarr_group, entry.group_df, entry.group_attrs
+                    )
 
-                    print(f"Wrote group {public_key} successfully!")
+                    print(f"Wrote group {entry.public_key} successfully!")
                 except Exception as e:
                     if (
                         "Could not find any dimension coordinates to use to order the Dataset objects for concatenation"
                         not in str(e)
                     ):
-                        self.failed_list.append((public_key, e))
-                        print(f"Failed to write group {public_key}: {e}")
+                        self.failed_list.append((entry.public_key, e))
+                        print(f"Failed to write group {entry.public_key}: {e}")
                     else:
                         try:
                             # Filter out mfdataset specific kwargs that would cause the single-dataset open to fail
@@ -666,25 +676,28 @@ class IcechunkStoreBuilder(AbstractIcechunkStoreBuilder):
                                 ]
                             }
                             with xr.open_dataset(
-                                file_paths[0],
+                                entry.file_paths[0],
                                 **kwargs,
                             ) as ds:
                                 to_icechunk(
-                                    ds, store.session, group=public_key, mode="a"
+                                    ds,
+                                    store.session,
+                                    group=entry.public_key,
+                                    mode="a",
                                 )
                             # Write group metadata into .zattrs so the catalog can search
                             # these groups without opening the arrays.
                             zarr_group = zarr.open_group(
-                                store, path=public_key, mode="a"
+                                store, path=entry.public_key, mode="a"
                             )
                             self._attach_catalog_metadata(
-                                zarr_group, group_df, group_attrs
+                                zarr_group, entry.group_df, entry.group_attrs
                             )
 
-                            print(f"Wrote group {public_key} successfully!")
+                            print(f"Wrote group {entry.public_key} successfully!")
                         except Exception as e:
-                            self.failed_list.append((public_key, e))
-                            print(f"Failed to write group {public_key}: {e}")
+                            self.failed_list.append((entry.public_key, e))
+                            print(f"Failed to write group {entry.public_key}: {e}")
 
         # Write the JSON sidecar inside the store directory
         sidecar_fname = _intake_cat_filename(self.store_path)
