@@ -291,9 +291,7 @@ class TestVirtualIcechunkStoreBuilder(BuilderTests):
             public_key="bar", group_attrs={}, file_paths=["a"]
         )
 
-        with pytest.raises(
-            GroupEntryError, match="does not include source file paths"
-        ):
+        with pytest.raises(GroupEntryError, match="does not include source file paths"):
             missing_paths.require_file_paths()
 
         with pytest.raises(
@@ -301,9 +299,7 @@ class TestVirtualIcechunkStoreBuilder(BuilderTests):
         ):
             missing_metadata.require_group_df()
 
-    def test_iter_esm_groups(
-        self, local_om2_datastore_path, intake_esm_kwargs, tmpdir
-    ):
+    def test_iter_esm_groups(self, local_om2_datastore_path, intake_esm_kwargs, tmpdir):
         """The shared ESM iterator should yield one structured entry per catalog key."""
         dummy_store_path = tmpdir / "dummy_store.icechunk"
         builder = VirtualIcechunkStoreBuilder(
