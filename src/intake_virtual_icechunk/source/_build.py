@@ -82,7 +82,7 @@ class IcechunkStoreBuilder(abc.ABC):
     * :class:`VirtualIcechunkStoreBuilder` — creates virtual references via
       VirtualiZarr; source data is never moved.
     * :class:`ZarrIcechunkStoreBuilder` — copies real data chunks into the
-      Icechunk store via ``xarray.open_mfdataset`` + ``Dataset.to_zarr``.
+      Icechunk store via ``icechunk.xarray.to_icechunk``.
 
     Subclasses share catalogue discovery, metadata attachment, and sidecar
     serialisation logic defined here.
@@ -647,7 +647,7 @@ class ZarrIcechunkStoreBuilder(IcechunkStoreBuilder):
                         not in str(e)
                     ):
                         self.failed_list.append((public_key, e))
-                        print(f"Failed to virtualise group {public_key}: {e}")
+                        print(f"Failed to write group {public_key}: {e}")
                     else:
                         try:
                             with xr.open_dataset(
