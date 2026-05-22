@@ -73,7 +73,7 @@ class DataStoreStructure:
     assets_col: str
 
 
-class IcechunkStoreBuilder(abc.ABC):
+class AbstractIcechunkStoreBuilder(abc.ABC):
     """Abstract base class for building Icechunk stores from intake-esm catalogs.
 
     Concrete subclasses implement :meth:`build` to choose *how* source data
@@ -213,7 +213,7 @@ class IcechunkStoreBuilder(abc.ABC):
                 zarr_group.attrs[column] = group_df[column].iloc[0]
 
 
-class VirtualIcechunkStoreBuilder(IcechunkStoreBuilder):
+class VirtualIcechunkStoreBuilder(AbstractIcechunkStoreBuilder):
     """Build a virtual Icechunk store from an existing intake-esm datastore.
 
     Given a pre-built intake-esm catalog, this builder iterates over every
@@ -513,7 +513,7 @@ class VirtualIcechunkStoreBuilder(IcechunkStoreBuilder):
         model.save(sidecar_fname, store=sidecar_store)
 
 
-class ZarrIcechunkStoreBuilder(IcechunkStoreBuilder):
+class IcechunkStoreBuilder(AbstractIcechunkStoreBuilder):
     """Build a real Icechunk store by copying data from an intake-esm datastore.
 
     Given a pre-built intake-esm catalog, this builder iterates over every

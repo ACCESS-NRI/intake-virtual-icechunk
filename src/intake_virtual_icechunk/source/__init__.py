@@ -1,13 +1,13 @@
 from ._build import (
+    AbstractIcechunkStoreBuilder,
     IcechunkStoreBuilder,
     VirtualIcechunkStoreBuilder,
-    ZarrIcechunkStoreBuilder,
 )
 from ._containers import VirtualChunkContainerModel
 
 __all__ = [
-    "IcechunkStoreBuilder",
+    "AbstractIcechunkStoreBuilder",
     "VirtualIcechunkStoreBuilder",
-    "ZarrIcechunkStoreBuilder",
+    "IcechunkStoreBuilder",
     "VirtualChunkContainerModel",
 ]

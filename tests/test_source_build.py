@@ -18,9 +18,9 @@ from obstore.store import ObjectStore, from_url
 from pandas.testing import assert_frame_equal
 
 from intake_virtual_icechunk.source import (
+    AbstractIcechunkStoreBuilder,
     IcechunkStoreBuilder,
     VirtualIcechunkStoreBuilder,
-    ZarrIcechunkStoreBuilder,
 )
 from intake_virtual_icechunk.utils import _intake_cat_filename
 
@@ -529,7 +529,7 @@ class TestIcechunkStoreBuilderIsAbstract:
 
         dummy_store_path = tmpdir / "dummy_store.icechunk"
         with pytest.raises(TypeError, match="Can't instantiate abstract class"):
-            IcechunkStoreBuilder(
+            AbstractIcechunkStoreBuilder(
                 esm_datastore_path=local_om2_datastore_path,
                 icechunk_store_path=dummy_store_path,
                 esm_datastore_kwargs=intake_esm_kwargs,
@@ -554,7 +554,7 @@ class TestZarrIcechunkStoreBuilder:
     def test_init(self, local_om2_datastore_path, intake_esm_kwargs, tmpdir):
         """Initialisation should store all parameters and not open the datastore."""
         dummy_store_path = tmpdir / "dummy_store.icechunk"
-        builder = ZarrIcechunkStoreBuilder(
+        builder = IcechunkStoreBuilder(
             esm_datastore_path=local_om2_datastore_path,
             icechunk_store_path=dummy_store_path,
             esm_datastore_kwargs=intake_esm_kwargs,
@@ -571,7 +571,7 @@ class TestZarrIcechunkStoreBuilder:
     ):
         """xarray_kwargs should be forwarded and stored."""
         dummy_store_path = tmpdir / "dummy_store.icechunk"
-        builder = ZarrIcechunkStoreBuilder(
+        builder = IcechunkStoreBuilder(
             esm_datastore_path=local_om2_datastore_path,
             icechunk_store_path=dummy_store_path,
             esm_datastore_kwargs=intake_esm_kwargs,
@@ -583,7 +583,7 @@ class TestZarrIcechunkStoreBuilder:
     def test_repr_defaults(self, local_om2_datastore_path, intake_esm_kwargs, tmpdir):
         """__repr__ should show all fields and start with the class name."""
         dummy_store_path = tmpdir / "dummy_store.icechunk"
-        builder = ZarrIcechunkStoreBuilder(
+        builder = IcechunkStoreBuilder(
             esm_datastore_path=local_om2_datastore_path,
             icechunk_store_path=dummy_store_path,
             esm_datastore_kwargs=intake_esm_kwargs,
@@ -605,7 +605,7 @@ class TestZarrIcechunkStoreBuilder:
     ):
         """__repr__ should reflect non-default values."""
         dummy_store_path = tmpdir / "dummy_store.icechunk"
-        builder = ZarrIcechunkStoreBuilder(
+        builder = IcechunkStoreBuilder(
             esm_datastore_path=local_om2_datastore_path,
             icechunk_store_path=dummy_store_path,
             esm_datastore_kwargs=intake_esm_kwargs,
@@ -628,7 +628,7 @@ class TestZarrIcechunkStoreBuilder:
         a JSON sidecar with no virtual_chunk_model, and zero failures.
         """
         dummy_store_path = tmpdir / "dummy_store.icechunk"
-        builder = ZarrIcechunkStoreBuilder(
+        builder = IcechunkStoreBuilder(
             esm_datastore_path=local_om2_datastore_path,
             icechunk_store_path=dummy_store_path,
             esm_datastore_kwargs=intake_esm_kwargs,
@@ -653,7 +653,7 @@ class TestZarrIcechunkStoreBuilder:
         import json
 
         dummy_store_path = tmpdir / "dummy_store.icechunk"
-        builder = ZarrIcechunkStoreBuilder(
+        builder = IcechunkStoreBuilder(
             esm_datastore_path=local_om2_datastore_path,
             icechunk_store_path=dummy_store_path,
             esm_datastore_kwargs=intake_esm_kwargs,
@@ -675,7 +675,7 @@ class TestZarrIcechunkStoreBuilder:
         IcechunkCatalog without needing virtual-chunk credentials.
         """
         dummy_store_path = tmpdir / "dummy_store.icechunk"
-        builder = ZarrIcechunkStoreBuilder(
+        builder = IcechunkStoreBuilder(
             esm_datastore_path=local_om2_datastore_path,
             icechunk_store_path=dummy_store_path,
             esm_datastore_kwargs=intake_esm_kwargs,
