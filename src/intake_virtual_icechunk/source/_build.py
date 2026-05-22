@@ -91,8 +91,8 @@ class GroupEntry:
 
     public_key: str
     group_attrs: dict[str, Any]
-    group_df: pd.DataFrame | None = None
-    file_paths: list[str] | None = None
+    metadata_df: pd.DataFrame | None = None
+    source_file_paths: list[str] | None = None
 
     @classmethod
     def from_esm_group(
@@ -114,28 +114,30 @@ class GroupEntry:
         return cls(
             public_key=public_key,
             group_attrs=group_attrs,
-            group_df=group_df,
-            file_paths=file_paths,
+            metadata_df=group_df,
+            source_file_paths=file_paths,
         )
 
-    def require_group_df(self) -> pd.DataFrame:
+    @property
+    def group_df(self) -> pd.DataFrame:
         """Return the metadata dataframe required by catalog-shaped builder paths."""
 
-        if self.group_df is None:
+        if self.metadata_df is None:
             raise GroupEntryError(
                 "Group entry "
                 f"'{self.public_key}' does not include a metadata dataframe."
             )
-        return self.group_df
+        return self.metadata_df
 
-    def require_file_paths(self) -> list[str]:
+    @property
+    def file_paths(self) -> list[str]:
         """Return the source paths required by source-asset builder paths."""
 
-        if not self.file_paths:
+        if not self.source_file_paths:
             raise GroupEntryError(
                 f"Group entry '{self.public_key}' does not include source file paths."
             )
-        return self.file_paths
+        return self.source_file_paths
 
 
 class AbstractIcechunkStoreBuilder(abc.ABC):
@@ -254,7 +256,7 @@ class AbstractIcechunkStoreBuilder(abc.ABC):
 
         self._attach_catalog_metadata(
             zarr_group,
-            entry.require_group_df(),
+            entry.group_df,
             entry.group_attrs,
         )
 
@@ -526,7 +528,7 @@ class VirtualIcechunkStoreBuilder(AbstractIcechunkStoreBuilder):
             for entry in self._iter_esm_groups():
                 try:
                     with open_virtual_mfdataset(
-                        urls=entry.require_file_paths(),
+                        urls=entry.file_paths,
                         parser=self.parser,
                         registry=self.obstore_registry,
                         parallel="dask",
@@ -561,7 +563,7 @@ class VirtualIcechunkStoreBuilder(AbstractIcechunkStoreBuilder):
                     else:
                         try:
                             with open_virtual_dataset(
-                                url=entry.require_file_paths()[0],
+                                url=entry.file_paths[0],
                                 parser=self.parser,
                                 registry=self.obstore_registry,
                                 decode_times=False,
@@ -701,7 +703,7 @@ class IcechunkStoreBuilder(AbstractIcechunkStoreBuilder):
             for entry in self._iter_esm_groups():
                 try:
                     with xr.open_mfdataset(
-                        entry.require_file_paths(), **self.xarray_kwargs
+                        entry.file_paths, **self.xarray_kwargs
                     ) as ds:
                         to_icechunk(ds, store.session, group=entry.public_key, mode="a")
 
@@ -733,7 +735,7 @@ class IcechunkStoreBuilder(AbstractIcechunkStoreBuilder):
                                 ]
                             }
                             with xr.open_dataset(
-                                entry.require_file_paths()[0],
+                                entry.file_paths[0],
                                 **kwargs,
                             ) as ds:
                                 to_icechunk(

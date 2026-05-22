@@ -285,19 +285,19 @@ class TestVirtualIcechunkStoreBuilder(BuilderTests):
     def test_group_entry_requirements(self):
         """Entry helpers should fail clearly when a path lacks payloads."""
         missing_paths = GroupEntry(
-            public_key="foo", group_attrs={}, group_df=pd.DataFrame()
+            public_key="foo", group_attrs={}, metadata_df=pd.DataFrame()
         )
         missing_metadata = GroupEntry(
-            public_key="bar", group_attrs={}, file_paths=["a"]
+            public_key="bar", group_attrs={}, source_file_paths=["a"]
         )
 
         with pytest.raises(GroupEntryError, match="does not include source file paths"):
-            missing_paths.require_file_paths()
+            _ = missing_paths.file_paths
 
         with pytest.raises(
             GroupEntryError, match="does not include a metadata dataframe"
         ):
-            missing_metadata.require_group_df()
+            _ = missing_metadata.group_df
 
     def test_iter_esm_groups(self, local_om2_datastore_path, intake_esm_kwargs, tmpdir):
         """The shared ESM iterator should yield one structured entry per catalog key."""
@@ -315,10 +315,10 @@ class TestVirtualIcechunkStoreBuilder(BuilderTests):
         assert all(isinstance(entry, GroupEntry) for entry in entries)
         assert {entry.public_key for entry in entries} == set(builder.esm_ds.keys())
         assert builder.esm_ds.esmcat.assets.column_name in builder.drop_cols
-        assert all(not entry.require_group_df().empty for entry in entries)
-        assert all(entry.require_file_paths() for entry in entries)
+        assert all(not entry.group_df.empty for entry in entries)
+        assert all(entry.file_paths for entry in entries)
         assert all(
-            set(entry.group_attrs).issubset(set(entry.require_group_df().columns))
+            set(entry.group_attrs).issubset(set(entry.group_df.columns))
             for entry in entries
         )
 
