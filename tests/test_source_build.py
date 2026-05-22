@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import icechunk
 import intake
 import numpy as np
+import pandas as pd
 import pytest
 import tlz
 import virtualizarr
@@ -22,7 +23,7 @@ from intake_virtual_icechunk.source import (
     IcechunkStoreBuilder,
     VirtualIcechunkStoreBuilder,
 )
-from intake_virtual_icechunk.source._build import GroupEntry
+from intake_virtual_icechunk.source._build import GroupEntry, GroupEntryError
 from intake_virtual_icechunk.utils import _intake_cat_filename
 
 __all__ = ["VirtualIcechunkStoreBuilder", "pytest"]
@@ -253,7 +254,56 @@ class TestVirtualIcechunkStoreBuilder(BuilderTests):
 
         assert inferred_parser == parser
 
-    def test_iter_esm_groups(self, local_om2_datastore_path, intake_esm_kwargs, tmpdir):
+    def test_group_entry_from_esm_group(
+        self, local_om2_datastore_path, intake_esm_kwargs, tmpdir
+    ):
+        """GroupEntry.from_esm_group should encapsulate ESM-specific derivation."""
+        dummy_store_path = tmpdir / "dummy_store.icechunk"
+        builder = VirtualIcechunkStoreBuilder(
+            esm_datastore_path=local_om2_datastore_path,
+            esm_datastore_kwargs=intake_esm_kwargs,
+            icechunk_store_path=dummy_store_path,
+        )
+
+        structure = builder._prepare_group_iteration()
+        esmcat = builder.esm_ds.esmcat
+        public_key, internal_key = next(iter(esmcat._construct_group_keys().items()))
+        group_df = esmcat.grouped.get_group(internal_key)
+
+        entry = GroupEntry.from_esm_group(
+            public_key=public_key,
+            group_df=group_df,
+            groupby_attrs=structure.groupby_attrs,
+            assets_col=structure.assets_col,
+        )
+
+        assert entry.public_key == public_key
+        assert entry.group_df is group_df
+        assert entry.file_paths == group_df[structure.assets_col].tolist()
+        assert set(entry.group_attrs).issubset(set(group_df.columns))
+
+    def test_group_entry_requirements(self):
+        """Entry helpers should fail clearly when a builder path lacks required payloads."""
+        missing_paths = GroupEntry(
+            public_key="foo", group_attrs={}, group_df=pd.DataFrame()
+        )
+        missing_metadata = GroupEntry(
+            public_key="bar", group_attrs={}, file_paths=["a"]
+        )
+
+        with pytest.raises(
+            GroupEntryError, match="does not include source file paths"
+        ):
+            missing_paths.require_file_paths()
+
+        with pytest.raises(
+            GroupEntryError, match="does not include a metadata dataframe"
+        ):
+            missing_metadata.require_group_df()
+
+    def test_iter_esm_groups(
+        self, local_om2_datastore_path, intake_esm_kwargs, tmpdir
+    ):
         """The shared ESM iterator should yield one structured entry per catalog key."""
         dummy_store_path = tmpdir / "dummy_store.icechunk"
         builder = VirtualIcechunkStoreBuilder(
@@ -269,10 +319,10 @@ class TestVirtualIcechunkStoreBuilder(BuilderTests):
         assert all(isinstance(entry, GroupEntry) for entry in entries)
         assert {entry.public_key for entry in entries} == set(builder.esm_ds.keys())
         assert builder.esm_ds.esmcat.assets.column_name in builder.drop_cols
-        assert all(not entry.group_df.empty for entry in entries)
-        assert all(entry.file_paths for entry in entries)
+        assert all(not entry.require_group_df().empty for entry in entries)
+        assert all(entry.require_file_paths() for entry in entries)
         assert all(
-            set(entry.group_attrs).issubset(set(entry.group_df.columns))
+            set(entry.group_attrs).issubset(set(entry.require_group_df().columns))
             for entry in entries
         )
 
