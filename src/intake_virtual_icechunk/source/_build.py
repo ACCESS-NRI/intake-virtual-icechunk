@@ -650,9 +650,23 @@ class ZarrIcechunkStoreBuilder(IcechunkStoreBuilder):
                         print(f"Failed to write group {public_key}: {e}")
                     else:
                         try:
+                            # Filter out mfdataset specific kwargs that would cause the single-dataset open to fail
+                            kwargs = {
+                                k: v
+                                for k, v in self.xarray_kwargs.items()
+                                if k
+                                not in [
+                                    "parallel",
+                                    "coords",
+                                    "compat",
+                                    "combine_attrs",
+                                    "join",
+                                    "concat_dim",
+                                ]
+                            }
                             with xr.open_dataset(
                                 file_paths[0],
-                                **self.xarray_kwargs,
+                                **kwargs,
                             ) as ds:
                                 to_icechunk(
                                     ds, store.session, group=public_key, mode="a"
