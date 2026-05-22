@@ -1,0 +1,24 @@
+name: Clean Ceph Store
+
+on:
+  schedule:
+    - cron: "0 14 * * *"  # midnight AEST (UTC+10)
+  workflow_dispatch:
+
+jobs:
+  clean-ceph-store:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+
+      - name: Setup pixi
+        uses: prefix-dev/setup-pixi@v0.9.5
+        with:
+          environments: default
+
+      - name: Clean Ceph store
+        env:
+          CEPH_ACCESS_KEY_ID: ${{ secrets.CEPH_ACCESS_KEY_ID }}
+          CEPH_SECRET_ACCESS_KEY: ${{ secrets.CEPH_SECRET_ACCESS_KEY }}
+        run: pixi run clean-ceph-store

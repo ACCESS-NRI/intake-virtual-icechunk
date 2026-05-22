@@ -95,7 +95,9 @@ class VirtualChunkContainerModel:
 
         if store_type is None:
             raise ValueError(f"Unsupported store type: {self.store_type!r}")
-        return store_type(self.url_prefix, **self.open_kwargs)
+        if store_type is icechunk.local_filesystem_store:
+            return store_type(self.url_prefix, **self.open_kwargs)
+        return store_type(**self.open_kwargs)
 
     def to_dict(self) -> dict:
         """
