@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import abc
-from collections.abc import Generator, Mapping
+from collections.abc import Generator, Iterable, Mapping
 
 # Copyright 2026 ACCESS-NRI and contributors. See the top-level COPYRIGHT file for details.
 # SPDX-License-Identifier: Apache-2.0
@@ -247,6 +247,47 @@ class AbstractIcechunkStoreBuilder(abc.ABC):
         """Build the Icechunk store from the intake-esm catalog."""
         ...
 
+    @abc.abstractmethod
+    def _write_entry(self, store: icechunk.IcechunkStore, entry: GroupEntry) -> None:
+        """Materialize one entry into an open Icechunk transaction."""
+        ...
+
+    @abc.abstractmethod
+    def _entry_action_verb(self) -> str:
+        """Return the verb used in builder progress/error messages."""
+        ...
+
+    def _build_from_entries(
+        self,
+        repo: icechunk.Repository,
+        entries: Iterable[GroupEntry],
+        *,
+        message: str,
+    ) -> None:
+        """Write an entry iterable into a repo transaction using this builder's path."""
+
+        self.failed_list = []
+
+        with repo.transaction("main", message=message) as store:
+            for entry in entries:
+                try:
+                    self._write_entry(store, entry)
+                except Exception as e:
+                    self.failed_list.append((entry.public_key, e))
+                    print(
+                        f"Failed to {self._entry_action_verb()} group "
+                        f"{entry.public_key}: {e}"
+                    )
+
+    @staticmethod
+    def _is_concat_dim_order_error(exc: Exception) -> bool:
+        """Return True when the exception is the xarray concat-order fallback case."""
+
+        return (
+            "Could not find any dimension coordinates to use to order the "
+            "Dataset objects for concatenation" in str(exc)
+        )
+
     def _attach_entry_metadata(
         self,
         zarr_group: zarr.Group,
@@ -470,6 +511,53 @@ class VirtualIcechunkStoreBuilder(AbstractIcechunkStoreBuilder):
 
         return self.obstore_registry
 
+    def _entry_action_verb(self) -> str:
+        """Return the verb used in progress/error messages for this builder."""
+
+        return "virtualise"
+
+    def _write_entry(self, store: icechunk.IcechunkStore, entry: GroupEntry) -> None:
+        """Write one virtualized group into an open Icechunk transaction."""
+
+        try:
+            with open_virtual_mfdataset(
+                urls=entry.file_paths,
+                parser=self.parser,
+                registry=self.obstore_registry,
+                parallel="dask",
+                decode_times=False,
+                coords="minimal",
+                compat="override",
+            ) as vds:
+                vds.vz.to_icechunk(store, group=entry.public_key)
+        except Exception as exc:
+            if not self._is_concat_dim_order_error(exc):
+                raise exc
+
+            with open_virtual_dataset(
+                url=entry.file_paths[0],
+                parser=self.parser,
+                registry=self.obstore_registry,
+                decode_times=False,
+            ) as vds:
+                vds.vz.to_icechunk(store, group=entry.public_key)
+
+        # Write group metadata into .zattrs so the catalog can search
+        # these groups without opening the arrays.
+        # We also want to attach metadata from the intake-esm catalog
+        # at this point. We don't need to attach things like variable
+        # names, because we can get those direct from the groups, but
+        # things like 'frequency', etc. will need to be included.
+
+        # To keep life simple, we'll just attach everything, and then
+        # compute variables, coordinates, dimensions etc. on the fly later
+        zarr_group = zarr.open_group(store, path=entry.public_key, mode="a")
+        # Would make more sense to merge group_attrs and esm_ds_metadata
+        # first in a sensible way
+        self._attach_entry_metadata(zarr_group, entry)
+
+        print(f"Virtualised group {entry.public_key} successfully!")
+
     def build(self) -> None:
         """Build the virtual Icechunk store.
 
@@ -517,69 +605,11 @@ class VirtualIcechunkStoreBuilder(AbstractIcechunkStoreBuilder):
         # default' behaviour.
         # self.vc_containers
 
-        # ------------------------------------------------------------------
-        # 3. Build each group inside a single transaction
-        # ------------------------------------------------------------------
-        self.failed_list: list[tuple[str, Exception]] = []
-
-        with repo.transaction(
-            "main", message=f"Build Virtual Icechunk catalog for {self.esm_ds.name}"
-        ) as store:
-            for entry in self._iter_esm_groups():
-                try:
-                    with open_virtual_mfdataset(
-                        urls=entry.file_paths,
-                        parser=self.parser,
-                        registry=self.obstore_registry,
-                        parallel="dask",
-                        decode_times=False,
-                        coords="minimal",
-                        compat="override",
-                    ) as vds:
-                        vds.vz.to_icechunk(store, group=entry.public_key)
-
-                    # Write group metadata into .zattrs so the catalog can search
-                    # these groups without opening the arrays.
-                    # We also want to attach metadata from the intake-esm catalog
-                    # at this point. We don't need to attach things like variable
-                    # names, because we can get those direct from the groups, but
-                    # things like 'frequency', etc. will need to be included.
-
-                    # To keep life simple, we'll just attach everything, and then
-                    # compute variables, coordinates, dimensions etc. on the fly later
-                    zarr_group = zarr.open_group(store, path=entry.public_key, mode="a")
-                    # Would make more sense to merge group_attrs and esm_ds_metadata
-                    # first in a sensible way
-                    self._attach_entry_metadata(zarr_group, entry)
-
-                    print(f"Virtualised group {entry.public_key} successfully!")
-                except Exception as e:
-                    if (
-                        "Could not find any dimension coordinates to use to order the Dataset objects for concatenation"
-                        not in str(e)
-                    ):
-                        self.failed_list.append((entry.public_key, e))
-                        print(f"Failed to virtualise group {entry.public_key}: {e}")
-                    else:
-                        try:
-                            with open_virtual_dataset(
-                                url=entry.file_paths[0],
-                                parser=self.parser,
-                                registry=self.obstore_registry,
-                                decode_times=False,
-                            ) as vds:
-                                vds.vz.to_icechunk(store, group=entry.public_key)
-                            # Write group metadata into .zattrs so the catalog can search
-                            # these groups without opening the arrays.
-                            zarr_group = zarr.open_group(
-                                store, path=entry.public_key, mode="a"
-                            )
-                            self._attach_entry_metadata(zarr_group, entry)
-
-                            print(f"Virtualised group {entry.public_key} successfully!")
-                        except Exception as e:
-                            self.failed_list.append((entry.public_key, e))
-                            print(f"Failed to virtualise group {entry.public_key}: {e}")
+        self._build_from_entries(
+            repo,
+            self._iter_esm_groups(),
+            message=f"Build Virtual Icechunk catalog for {self.esm_ds.name}",
+        )
 
         # Write the JSON sidecar inside the store directory
         sidecar_fname = _intake_cat_filename(self.store_path)
@@ -671,6 +701,53 @@ class IcechunkStoreBuilder(AbstractIcechunkStoreBuilder):
             "\n)"
         )
 
+    def _entry_action_verb(self) -> str:
+        """Return the verb used in progress/error messages for this builder."""
+
+        return "write"
+
+    def _write_entry(self, store: icechunk.IcechunkStore, entry: GroupEntry) -> None:
+        """Write one real-data group into an open Icechunk transaction."""
+
+        try:
+            with xr.open_mfdataset(entry.file_paths, **self.xarray_kwargs) as ds:
+                to_icechunk(ds, store.session, group=entry.public_key, mode="a")
+        except Exception as exc:
+            if not self._is_concat_dim_order_error(exc):
+                raise exc
+
+            # Filter out mfdataset specific kwargs that would cause the single-dataset open to fail
+            kwargs = {
+                k: v
+                for k, v in self.xarray_kwargs.items()
+                if k
+                not in [
+                    "parallel",
+                    "coords",
+                    "compat",
+                    "combine_attrs",
+                    "join",
+                    "concat_dim",
+                ]
+            }
+            with xr.open_dataset(
+                entry.file_paths[0],
+                **kwargs,
+            ) as ds:
+                to_icechunk(
+                    ds,
+                    store.session,
+                    group=entry.public_key,
+                    mode="a",
+                )
+
+        # Write group metadata into .zattrs so the catalog can search
+        # these groups without opening the arrays.
+        zarr_group = zarr.open_group(store, path=entry.public_key, mode="a")
+        self._attach_entry_metadata(zarr_group, entry)
+
+        print(f"Wrote group {entry.public_key} successfully!")
+
     def build(self) -> None:
         """Build the Icechunk store by copying real data from the source assets.
 
@@ -695,66 +772,11 @@ class IcechunkStoreBuilder(AbstractIcechunkStoreBuilder):
         repo = icechunk.Repository.create(storage, config)
         repo.save_config()
 
-        self.failed_list: list[tuple[str, Exception]] = []
-
-        with repo.transaction(
-            "main", message=f"Build Icechunk catalog for {self.esm_ds.name}"
-        ) as store:
-            for entry in self._iter_esm_groups():
-                try:
-                    with xr.open_mfdataset(
-                        entry.file_paths, **self.xarray_kwargs
-                    ) as ds:
-                        to_icechunk(ds, store.session, group=entry.public_key, mode="a")
-
-                    zarr_group = zarr.open_group(store, path=entry.public_key, mode="a")
-                    self._attach_entry_metadata(zarr_group, entry)
-
-                    print(f"Wrote group {entry.public_key} successfully!")
-                except Exception as e:
-                    if (
-                        "Could not find any dimension coordinates to use to order the Dataset objects for concatenation"
-                        not in str(e)
-                    ):
-                        self.failed_list.append((entry.public_key, e))
-                        print(f"Failed to write group {entry.public_key}: {e}")
-                    else:
-                        try:
-                            # Filter out mfdataset specific kwargs that would cause the single-dataset open to fail
-                            kwargs = {
-                                k: v
-                                for k, v in self.xarray_kwargs.items()
-                                if k
-                                not in [
-                                    "parallel",
-                                    "coords",
-                                    "compat",
-                                    "combine_attrs",
-                                    "join",
-                                    "concat_dim",
-                                ]
-                            }
-                            with xr.open_dataset(
-                                entry.file_paths[0],
-                                **kwargs,
-                            ) as ds:
-                                to_icechunk(
-                                    ds,
-                                    store.session,
-                                    group=entry.public_key,
-                                    mode="a",
-                                )
-                            # Write group metadata into .zattrs so the catalog can search
-                            # these groups without opening the arrays.
-                            zarr_group = zarr.open_group(
-                                store, path=entry.public_key, mode="a"
-                            )
-                            self._attach_entry_metadata(zarr_group, entry)
-
-                            print(f"Wrote group {entry.public_key} successfully!")
-                        except Exception as e:
-                            self.failed_list.append((entry.public_key, e))
-                            print(f"Failed to write group {entry.public_key}: {e}")
+        self._build_from_entries(
+            repo,
+            self._iter_esm_groups(),
+            message=f"Build Icechunk catalog for {self.esm_ds.name}",
+        )
 
         # Write the JSON sidecar inside the store directory
         sidecar_fname = _intake_cat_filename(self.store_path)

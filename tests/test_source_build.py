@@ -322,6 +322,54 @@ class TestVirtualIcechunkStoreBuilder(BuilderTests):
             for entry in entries
         )
 
+    def test_build_from_entries_tracks_failures_and_continues(
+        self, local_om2_datastore_path, intake_esm_kwargs, tmpdir
+    ):
+        """The shared entry-writing seam should keep iterating after one entry fails."""
+        dummy_store_path = tmpdir / "dummy_store.icechunk"
+        builder = VirtualIcechunkStoreBuilder(
+            esm_datastore_path=local_om2_datastore_path,
+            esm_datastore_kwargs=intake_esm_kwargs,
+            icechunk_store_path=dummy_store_path,
+        )
+
+        entries = [
+            GroupEntry(public_key="one", group_attrs={}, source_file_paths=["a"]),
+            GroupEntry(public_key="two", group_attrs={}, source_file_paths=["b"]),
+            GroupEntry(public_key="three", group_attrs={}, source_file_paths=["c"]),
+        ]
+
+        class FakeTransaction:
+            def __enter__(self):
+                return object()
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class FakeRepo:
+            def __init__(self):
+                self.calls = []
+
+            def transaction(self, branch, *, message):
+                self.calls.append((branch, message))
+                return FakeTransaction()
+
+        repo = FakeRepo()
+
+        with patch.object(
+            builder,
+            "_write_entry",
+            side_effect=[None, RuntimeError("boom"), None],
+        ) as write_entry:
+            builder._build_from_entries(repo, entries, message="demo build")
+
+        assert write_entry.call_count == len(entries)
+        assert repo.calls == [("main", "demo build")]
+        assert len(builder.failed_list) == 1
+        assert builder.failed_list[0][0] == "two"
+        with pytest.raises(RuntimeError, match="boom"):
+            raise builder.failed_list[0][1]
+
     def test_clean_build(self, local_om2_datastore_path, intake_esm_kwargs, tmpdir):
         """
         Test that the build method creates an IcechunkStore with the expected
