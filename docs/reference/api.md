@@ -10,7 +10,9 @@
   returned when you index into an `IcechunkCatalog`.
 - `intake_virtual_icechunk.cat.VirtualIcechunkCatalogModel`: the JSON sidecar model
   used to persist catalog metadata and reopen a store later.
-- `intake_virtual_icechunk.source._build.IcechunkStoreBuilder`: builds a virtual
+- `intake_virtual_icechunk.source._build.VirtualIcechunkStoreBuilder`: builds a virtual
+  Icechunk store from a pre-built intake-esm catalog.
+- `intake_virtual_icechunk.source._build.IcechunkStoreBuilder`: builds a real-data
   Icechunk store from a pre-built intake-esm catalog.
 - `intake_virtual_icechunk.source._containers.VirtualChunkContainerModel`: stores
   enough virtual chunk container configuration to round-trip a catalog safely.
@@ -29,6 +31,11 @@ The following API summary is auto-generated.
    :special-members: __init__
 
 .. autoclass:: intake_virtual_icechunk.cat.VirtualIcechunkCatalogModel
+   :members:
+   :noindex:
+   :special-members: __init__
+
+.. autoclass:: intake_virtual_icechunk.source._build.VirtualIcechunkStoreBuilder
    :members:
    :noindex:
    :special-members: __init__
