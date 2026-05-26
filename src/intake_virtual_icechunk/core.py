@@ -364,7 +364,7 @@ class IcechunkCatalog(Catalog):
         Generate a pretty representation of the catalog for display in Jupyter notebooks.
         """
 
-        text = pd.DataFrame(self.nunique())._repr_html_()
+        text = pd.DataFrame(self.unique())._repr_html_()
 
         return f"<p><strong>{self._id or ''} catalog with {len(self)} dataset(s) from {len(self.df)} asset(s)</strong>:</p> {text}"
 
@@ -483,7 +483,7 @@ class IcechunkCatalog(Catalog):
         )
         return IcechunkCatalog._from_parent(self, results["key"].tolist())
 
-    def nunique(self) -> pd.Series:
+    def unique(self) -> pd.Series:
         """
         Get the number of unique values for each column in the catalog DataFrame.
 
