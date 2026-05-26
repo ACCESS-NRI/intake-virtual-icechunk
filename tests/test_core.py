@@ -637,7 +637,7 @@ class TestIcechunkCatalog:
 
     def test_nunique(self, icechunk_localstore_path):
         cat = IcechunkCatalog(store=icechunk_localstore_path)
-        uniques = cat.nunique()
+        uniques = cat.unique()
 
         assert uniques.to_dict() == {
             "variable": 7,
