@@ -25,11 +25,30 @@ duplication), and accessible via `intake.open_virtual_icechunk()`.
 
 ## This package provides two things
 
-1. **Building** (`IcechunkStoreBuilder`) — given a pre-built intake-esm catalog, creates
-   virtual references with VirtualiZarr and writes each dataset as a named Zarr group
-   inside a single Icechunk store.
+1. **Building**
+   - `VirtualIcechunkStoreBuilder` — builds a virtual Icechunk store from a pre-built
+     intake-esm catalog without copying source data.
+   - `IcechunkStoreBuilder` — builds a real-data Icechunk store from a pre-built
+     intake-esm catalog by copying chunks into Icechunk.
 2. **Reading** (`IcechunkSource`) — an intake driver for opening a group from an Icechunk
    store as an `xarray.Dataset` via `intake.open_virtual_icechunk()`.
+
+## Builder API shape (for now)
+
+Both builders are still intentionally **catalog-first**: the public entrypoint is a
+pre-built intake-esm datastore.
+
+That is slightly conservative, but deliberate. The two builder paths are not yet
+symmetrical enough to justify a shared alternate-source API:
+
+- the **virtual** builder fundamentally needs source asset paths plus parser / provenance
+  context
+- the **real-data** builder is a more plausible future home for dataset-driven helper
+  APIs because it writes real chunks into Icechunk
+
+There is an internal `GroupEntry` seam to support later experimentation, but this package
+does **not** currently promise a shared public `from_dataset_dict(...)` /
+`from_group_iterator(...)` surface across both builders.
 
 ## Installation
 

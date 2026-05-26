@@ -87,6 +87,12 @@ class GroupEntry:
     only be able to supply a subset. Builder paths should therefore request the
     specific payload they need via the helper methods below rather than reaching
     directly into the raw attributes.
+
+    For now this remains an internal seam rather than a public alternate-source
+    constructor API. That is deliberate: the virtual and real-data builders do
+    not have symmetrical input requirements yet, so exposing a shared external
+    entrypoint here would risk advertising a cleaner abstraction than the code
+    can honestly support.
     """
 
     public_key: str
@@ -159,6 +165,12 @@ class AbstractIcechunkStoreBuilder(abc.ABC):
 
     Subclasses share catalogue discovery, metadata attachment, and sidecar
     serialisation logic defined here.
+
+    At present the public builder surface remains explicitly
+    ``intake-esm-catalog``-first. Although :class:`GroupEntry` gives us an
+    internal seam for future alternate sources, we intentionally avoid exposing
+    a shared public constructor for those sources until the virtual-vs-real
+    asymmetry is clearer.
 
     Parameters
     ----------
@@ -395,6 +407,11 @@ class VirtualIcechunkStoreBuilder(AbstractIcechunkStoreBuilder):
     Each group's ``.zattrs`` is populated with the ``groupby_attrs`` values for
     that dataset, so that :class:`~intake_virtual_icechunk.core.IcechunkCatalog`
     can discover, list, and search entries without reading any data arrays.
+
+    This builder is intentionally still catalog-first. A future alternate-source
+    API for the virtual path will likely need source asset paths plus parser /
+    provenance context, not just opened ``xarray.Dataset`` objects, so we avoid
+    promising a dataset-only constructor here for now.
 
     After the store is built, a lightweight JSON sidecar is written into the
     store directory so the catalog can be re-opened from the store path or with
@@ -666,6 +683,11 @@ class IcechunkStoreBuilder(AbstractIcechunkStoreBuilder):
     The resulting store requires no virtual chunk container configuration: it
     can be opened with :class:`~intake_virtual_icechunk.core.IcechunkCatalog`
     directly, without supplying any source-data credentials.
+
+    This builder is a better candidate than the virtual builder for future
+    dataset-driven convenience APIs because it materialises real chunks into the
+    store. We still keep the public surface catalog-first for now, though,
+    until there is a concrete caller that justifies freezing that API shape.
 
     Parameters
     ----------
