@@ -119,6 +119,12 @@ class GroupEntry:
         )
 
     @property
+    def has_metadata_df(self) -> bool:
+        """Return whether this entry includes rich per-asset metadata rows."""
+
+        return self.metadata_df is not None
+
+    @property
     def group_df(self) -> pd.DataFrame:
         """Return the metadata dataframe required by catalog-shaped builder paths."""
 
@@ -295,11 +301,29 @@ class AbstractIcechunkStoreBuilder(abc.ABC):
     ) -> None:
         """Attach metadata from a builder entry to a written Zarr group."""
 
-        self._attach_catalog_metadata(
-            zarr_group,
-            entry.group_df,
-            entry.group_attrs,
-        )
+        if entry.has_metadata_df:
+            self._attach_catalog_metadata(
+                zarr_group,
+                entry.group_df,
+                entry.group_attrs,
+            )
+            return
+
+        self._attach_group_attrs(zarr_group, entry.group_attrs)
+
+    def _attach_group_attrs(
+        self,
+        zarr_group: zarr.Group,
+        group_attrs: dict[str, Any],
+    ) -> None:
+        """Attach reduced metadata when only entry-level attrs are available."""
+
+        filtered_attrs = {
+            key: value
+            for key, value in group_attrs.items()
+            if key not in self.drop_cols
+        }
+        zarr_group.attrs.update(filtered_attrs)
 
     def _attach_catalog_metadata(
         self,
