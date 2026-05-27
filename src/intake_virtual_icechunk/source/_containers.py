@@ -1,13 +1,20 @@
+from __future__ import annotations
+
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 
 import icechunk
 from icechunk import ObjectStoreConfig, VirtualChunkContainer
 
+from intake_virtual_icechunk.utils import _VCC_SAFE_KWARGS
+
 STORE_TYPE_MAP: dict[str, Callable] = {
     "LocalStore": icechunk.local_filesystem_store,
     "PyObjectStoreConfig_LocalFileSystem": icechunk.local_filesystem_store,
     "S3Store": icechunk.s3_store,
+    "S3CompatibleStore": icechunk.s3_store,  # S3-compatible (e.g. Ceph/Pawsey Acacia)
+    "PyObjectStoreConfig_S3": icechunk.s3_store,
+    "PyObjectStoreConfig_S3Compatible": icechunk.s3_store,
     "GCSStore": icechunk.gcs_store,
     # "AzureBlobStore": icechunk.azure_store,
     # ^ Doesn't appear to be an icechunk.azure_store storage config builder yet
@@ -55,11 +62,18 @@ class VirtualChunkContainerModel:
     @staticmethod
     def from_virtual_chunk_container(
         vc_container: VirtualChunkContainer,
-    ) -> "VirtualChunkContainerModel":
+        store_options: dict | None = None,
+    ) -> VirtualChunkContainerModel:
+        # Filter to only non-credential, serialisable keys so that config such
+        # as a custom endpoint URL survives a round-trip through the JSON sidecar
+        # without storing secrets.
+        safe_kwargs = {
+            k: v for k, v in (store_options or {}).items() if k in _VCC_SAFE_KWARGS
+        }
         return VirtualChunkContainerModel(
             url_prefix=vc_container.url_prefix,
             store_type=type(vc_container.store).__name__,
-            # open_kwargs=vc_container.store.open_kwargs, # Not right, doesn't matter until we start handling remoe stores
+            open_kwargs=safe_kwargs,
         )
 
     def to_virtual_chunk_container(self) -> VirtualChunkContainer:
@@ -81,7 +95,9 @@ class VirtualChunkContainerModel:
 
         if store_type is None:
             raise ValueError(f"Unsupported store type: {self.store_type!r}")
-        return store_type(self.url_prefix, **self.open_kwargs)
+        if store_type is icechunk.local_filesystem_store:
+            return store_type(self.url_prefix, **self.open_kwargs)
+        return store_type(**self.open_kwargs)
 
     def to_dict(self) -> dict:
         """
@@ -90,8 +106,11 @@ class VirtualChunkContainerModel:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: dict) -> "VirtualChunkContainerModel":
+    def from_dict(cls, d: dict | None) -> VirtualChunkContainerModel | None:
         """
         Create a VirtualChunkContainerModel from a dictionary (e.g. from JSON).
+        Returns ``None`` if *d* is ``None``.
         """
+        if d is None:
+            return None
         return cls(**d)

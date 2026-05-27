@@ -52,12 +52,12 @@ pygments_style = "sphinx"
 html_theme = "sphinx_book_theme"
 html_static_path = ["_static"]
 html_context = {
-    "github_user": "dougiesquire",
-    "github_repo": "intake-dataframe-catalog",
+    "github_user": "ACCESS-NRI",
+    "github_repo": "intake-virtual-icechunk",
     "github_version": "main",
-    "doc_path": "./docs",
+    "doc_path": "docs",
 }
 html_theme_options = {
     "use_edit_page_button": True,
-    "github_url": "https://github.com/ACCESS-NRI/intake-dataframe-catalog",
+    "github_url": "https://github.com/ACCESS-NRI/intake-virtual-icechunk",
 }

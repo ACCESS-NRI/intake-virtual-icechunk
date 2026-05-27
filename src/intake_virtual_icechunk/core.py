@@ -4,16 +4,21 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
+from collections.abc import Callable
 from functools import cached_property
 from pathlib import Path
 from uuid import uuid4
 
+import obstore
 import pandas as pd
 import polars as pl
 import zarr
 from intake.catalog import Catalog
+from obstore.store import from_url as _obs_from_url
 
+from intake_virtual_icechunk._search import pl_search
 from intake_virtual_icechunk._source import IcechunkDataSource
 from intake_virtual_icechunk.source._containers import VirtualChunkContainerModel
 from intake_virtual_icechunk.telemetry import (
@@ -22,7 +27,9 @@ from intake_virtual_icechunk.telemetry import (
     emit_telemetry,
 )
 from intake_virtual_icechunk.utils import (
+    _filter_config_args,
     _intake_cat_filename,
+    _path_to_url,
     _resolve_storage,
 )
 
@@ -30,6 +37,39 @@ if sys.version_info >= (3, 13):
     from warnings import deprecated
 else:
     from typing_extensions import deprecated
+
+
+def _read_sidecar_metadata(
+    store: str,
+    storage_options: dict | None = None,
+    sidecar_options: dict | None = None,
+) -> dict:
+    """
+    Open the JSON sidecar file for *store* and return its raw contents.
+
+    Parameters
+    ----------
+    store :
+        Path or URI of the Icechunk store directory.
+    storage_options :
+        Credential/config kwargs for the Icechunk storage backend.  Used as
+        the default obstore kwargs when *sidecar_options* is ``None``.
+    sidecar_options :
+        obstore kwargs used *only* to open the sidecar file.  When ``None``
+        the function falls back to *storage_options* (common case: sidecar
+        lives in the same bucket).  Pass ``{}`` explicitly to send nothing
+        to obstore (e.g. sidecar is local, store is remote).
+    """
+    effective = (
+        sidecar_options if sidecar_options is not None else (storage_options or {})
+    )
+    store_url = _path_to_url(store)
+    obs_store = _obs_from_url(store_url, config=_filter_config_args(effective))
+    fname = _intake_cat_filename(store)
+    content = obstore.get(obs_store, fname).bytes()
+    return json.loads(
+        bytes(content)  # double bytes here looks weird but is necessary
+    )
 
 
 def _match_query(attrs: dict, query: dict) -> bool:
@@ -68,8 +108,16 @@ class IcechunkCatalog(Catalog):
     storage_options : dict, optional
         Credential/config keyword arguments forwarded to the Icechunk storage
         backend (e.g. ``{'from_env': True}`` for S3).
+    sidecar_options : dict, optional
+        obstore config kwargs used only to read the JSON sidecar. When omitted,
+        *storage_options* is reused for the sidecar read.
     xarray_kwargs : dict, optional
         Keyword arguments forwarded to ``xarray.open_zarr()``.
+    virtual_chunk_model : dict or VirtualChunkContainerModel, optional
+        Pre-loaded virtual chunk container configuration. Supplying this skips
+        the sidecar read and is mainly used by ``from_json`` and ``search``.
+    catalog_id : str, optional
+        Catalog identifier loaded from a JSON sidecar.
     intake_kwargs : dict, optional
         Additional keyword arguments passed through to
         :py:class:`~intake.catalog.Catalog`.
@@ -97,33 +145,47 @@ class IcechunkCatalog(Catalog):
         store: Path | str,
         *,
         storage_options=None,
+        sidecar_options=None,
         xarray_kwargs=None,
         virtual_chunk_model=None,
         telemetry_context: TelemetryContext | None = None,
         telemetry_emitter: TelemetryEmitter | None = None,
+        catalog_id=None,
         **intake_kwargs,
     ):
         super().__init__(**intake_kwargs)
-        # Path may be passed as a string or a Path, we'll store it internally as
-        # a str, and convert back to a Path if and when where needed.
-        # TBC if this is a good idea.
+        # Keep the store path as a string because Icechunk and obstore helpers
+        # both accept path-like strings and URLs.
         self.store: str = str(store)
 
-        self.store_json = Path(self.store) / _intake_cat_filename(self.store)
-
-        with open(self.store_json) as f:
-            metadata = json.load(f)
+        if virtual_chunk_model is None:
+            metadata = _read_sidecar_metadata(
+                self.store, storage_options, sidecar_options
+            )
             self.storage_options = storage_options or metadata.get(
                 "storage_options", {}
             )
-            self.xarray_kwargs = storage_options or metadata.get("xarray_kwargs", {})
+            self.xarray_kwargs = xarray_kwargs or metadata.get("xarray_kwargs", {})
             self.virtual_chunk_model = VirtualChunkContainerModel.from_dict(
-                storage_options or metadata.get("virtual_chunk_model", {})
+                metadata.get("virtual_chunk_model")
             )
             self._id = metadata.get("id", None)
+        else:
+            # Full config already supplied by the caller (e.g. _from_parent or
+            # from_json).  Skip the sidecar read entirely — this avoids the
+            # sidecar_options/storage_options confusion when constructing derived
+            # catalogs and prevents an unnecessary round-trip to object storage.
+            self.storage_options = storage_options or {}
+            self.xarray_kwargs = xarray_kwargs or {}
+            self.virtual_chunk_model = VirtualChunkContainerModel.from_dict(
+                virtual_chunk_model
+            )
+            self._id = catalog_id or None
 
         self.virtual_chunk_container = (
             self.virtual_chunk_model.to_virtual_chunk_container()
+            if self.virtual_chunk_model is not None
+            else None
         )
 
         self.telemetry_context = telemetry_context or TelemetryContext(
@@ -153,14 +215,16 @@ class IcechunkCatalog(Catalog):
 
             storage = _resolve_storage(self.store, self.storage_options)
 
-            credentials = icechunk.containers_credentials(
-                {self.virtual_chunk_model.url_prefix: None}
-            )
-
-            self._open_repo = icechunk.Repository.open(
-                storage,
-                authorize_virtual_chunk_access=credentials,
-            )
+            if self.virtual_chunk_container is not None:
+                credentials = icechunk.containers_credentials(
+                    {self.virtual_chunk_model.url_prefix: None}
+                )
+                self._open_repo = icechunk.Repository.open(
+                    storage,
+                    authorize_virtual_chunk_access=credentials,
+                )
+            else:
+                self._open_repo = icechunk.Repository.open(storage)
         return self._open_repo
 
     @property
@@ -190,10 +254,17 @@ class IcechunkCatalog(Catalog):
             store=parent.store,
             storage_options=parent.storage_options,
             xarray_kwargs=parent.xarray_kwargs,
-            virtual_chunk_model=parent.virtual_chunk_model,
+            virtual_chunk_model=(
+                parent.virtual_chunk_model.to_dict()
+                if parent.virtual_chunk_model is not None
+                else None
+            ),
             telemetry_context=parent.telemetry_context,
             telemetry_emitter=parent.telemetry_emitter,
         )
+        # Preserve parent metadata that is not re-read from the sidecar when
+        # virtual_chunk_model is supplied (see __init__ branching logic).
+        cat._id = parent._id
         # Share the already-opened backend so we don't re-open the repo.
         cat._open_repo = parent._open_repo
         cat._open_zarr_store = parent._open_zarr_store
@@ -220,8 +291,8 @@ class IcechunkCatalog(Catalog):
         xarray_kwargs : dict, optional
             Keyword arguments forwarded to ``xarray.open_zarr()``.
         storage_options : dict, optional
-            fsspec options for *reading the JSON file itself* (not for the
-            Icechunk store — those are embedded in the JSON).
+            obstore config kwargs for *reading the JSON file itself* (not for
+            the Icechunk store — those are embedded in the JSON).
         """
         from .cat import VirtualIcechunkCatalogModel
 
@@ -232,7 +303,12 @@ class IcechunkCatalog(Catalog):
             store=model.store,
             storage_options=model.storage_options,
             xarray_kwargs=xarray_kwargs or {},
-            virtual_chunk_model=model.virtual_chunk_model,
+            virtual_chunk_model=(
+                model.virtual_chunk_model.to_dict()
+                if model.virtual_chunk_model is not None
+                else None
+            ),
+            catalog_id=model.id or None,
         )
 
     # ------------------------------------------------------------------
@@ -266,7 +342,11 @@ class IcechunkCatalog(Catalog):
             storage_options=self.storage_options,
             virtual_chunk_model=self.virtual_chunk_model,
         )
-        model.save(name, directory=directory, json_dump_kwargs=json_dump_kwargs)
+        dir_url = _path_to_url(directory or os.getcwd())
+        obs_store = _obs_from_url(
+            dir_url, config=_filter_config_args(self.storage_options)
+        )
+        model.save(name, store=obs_store, json_dump_kwargs=json_dump_kwargs)
 
     # ------------------------------------------------------------------
     # Core catalog interface
@@ -299,7 +379,7 @@ class IcechunkCatalog(Catalog):
         Generate a pretty representation of the catalog for display in Jupyter notebooks.
         """
 
-        text = pd.DataFrame(self.nunique())._repr_html_()
+        text = pd.DataFrame(self.unique())._repr_html_()
 
         return f"<p><strong>{self._id or ''} catalog with {len(self)} dataset(s) from {len(self.df)} asset(s)</strong>:</p> {text}"
 
@@ -374,12 +454,20 @@ class IcechunkCatalog(Catalog):
     # Search and metadata
     # ------------------------------------------------------------------
 
-    def search(self, **query) -> IcechunkCatalog:
+    def search(
+        self,
+        **query,
+    ) -> IcechunkCatalog:
         """
         Search for entries in the catalog by matching group ``.zattrs``.
 
         Parameters
         ----------
+        require_all_on : str or list of str, optional
+            If specified, the given column(s) must match *all* values in the query.
+            Mostly for back compatibility with intake-esm, although I don't really
+            understand it & I'm not sure it should be kept
+
         **query
             Each keyword maps to a ``.zattrs`` attribute name.  The value
             may be a scalar or a list of allowed values.
@@ -399,11 +487,7 @@ class IcechunkCatalog(Catalog):
         if not query:
             return self
 
-        matched = [
-            key
-            for key in self.keys()
-            if _match_query(dict(self._root_group[key].attrs), query)
-        ]
+
         context = self.telemetry_context.with_updates(
             search_id=uuid4().hex,
             search_params=dict(query),
@@ -416,14 +500,28 @@ class IcechunkCatalog(Catalog):
             context,
             {"query": dict(query), "result_count": len(matched)},
         )
-        result = IcechunkCatalog._from_parent(self, matched)
-        result.telemetry_context = context
-        return result
+        colnames = set(self.df.columns)
+        if not any(key in colnames for key in query.keys()):
+            return IcechunkCatalog._from_parent(self, [])
 
-    def nunique(self) -> pd.Series:
+        lf = pl.from_pandas(self.df.reset_index()).lazy()
+        normalized_query = {
+            k: v if isinstance(v, list) else [v] for k, v in query.items()
+        }
+        results = pl_search(
+            lf=lf,
+            query=normalized_query,
+            columns_with_iterables=self.columns_with_iterables,
+        )
+        return IcechunkCatalog._from_parent(self, results["key"].tolist())
+
+
+    def unique(self) -> pd.Series:
         """
         Get the number of unique values for each column in the catalog DataFrame.
-        Coverts to polars to handle this because why not. Pandas sucks
+
+        Iterable-valued columns are exploded before counting so their values are
+        counted individually rather than as whole tuples.
         """
         return _nunique(pl.from_pandas(self.df))
 
@@ -438,6 +536,7 @@ class IcechunkCatalog(Catalog):
         :class:`~intake_virtual_icechunk._build.IcechunkStoreBuilder`.
         """
         records = []
+
         for key in self.keys():
             _df = IcechunkDataSource(
                 key=key,
@@ -452,10 +551,12 @@ class IcechunkCatalog(Catalog):
             ).to_xarray()
             row: dict = {"key": key}
             row.update(
-                {"Variable": tuple(_df.data_vars) or None}
+                {"variable": tuple(_df.data_vars) or None}
             )  # grid files might be none - better that than an empty list which is more likely to cause confusion
-            row.update({"Coordinates": tuple(_df.coords)})
-            row.update({"Dimensions": tuple(_df.dims)})
+            row.update(
+                {"coordinates": tuple(_df.coords)}
+            )  # Has to coordinates, not coordinate: zarr stores coords internally as a space seprated list in a single attribute called coordinates.
+            row.update({"dimensions": tuple(_df.dims)})
 
             keys = [k.lower() for k in row.keys()]
             attrs = {
@@ -465,19 +566,31 @@ class IcechunkCatalog(Catalog):
             }
 
             row.update(attrs)
+            records.append(
+                {k: tuple(v) if isinstance(v, list) else v for k, v in row.items()}
+            )
 
-            records.append(row)
-            # Finally, convert all list columns to tuples
-            records = [
-                {k: tuple(v) if isinstance(v, list) else v for k, v in r.items()}
-                for r in records
-            ]
         return pd.DataFrame(records).set_index("key", drop=True)
+
+    @cached_property
+    def columns_with_iterables(self) -> set[str]:
+        """
+        Return a set of column names that contain iterable values (e.g. lists).
+
+        This is needed to know which columns to unpack when doing searches with
+        iterable query values.
+        """
+        pl_df = pl.from_pandas(self.df.head(1))
+
+        colnames, dtypes = pl_df.columns, pl_df.dtypes
+        return {colname for colname, dtype in zip(colnames, dtypes) if dtype == pl.List}
 
     def to_dataset_dict(
         self,
         xarray_kwargs: dict | None = None,
         progressbar: bool = True,
+        preprocess: Callable | None = None,
+        storage_options: dict | None = None,
     ) -> dict:
         """
         Load catalog entries into a dictionary of xarray Datasets.
@@ -490,6 +603,16 @@ class IcechunkCatalog(Catalog):
             construction time.
         progressbar : bool, optional
             If ``True``, display a progress bar while loading datasets.
+        preprocess : callable, optional
+            A callable with the signature ``preprocess(ds: xr.Dataset) ->
+            xr.Dataset`` applied to each dataset immediately after loading,
+            mirroring the ``preprocess`` argument of
+            :func:`xarray.open_mfdataset`.
+        storage_options : dict, optional
+            Storage credentials/config merged with (and taking precedence over)
+            the catalog-level ``storage_options`` before constructing each
+            data source. Retained for API parity with ``intake-esm``; the
+            already-opened Icechunk store object does not use these options.
 
         Returns
         -------
@@ -497,6 +620,7 @@ class IcechunkCatalog(Catalog):
             One Dataset per catalog entry, keyed by the group path.
         """
         merged_kwargs = {**self.xarray_kwargs, **(xarray_kwargs or {})}
+        merged_storage = {**self.storage_options, **(storage_options or {})}
         keys = self.keys()
 
         if progressbar:
@@ -513,14 +637,17 @@ class IcechunkCatalog(Catalog):
                 key=key,
                 store=self._zarr_store,
                 group=key,
-                storage_options=self.storage_options,
+                storage_options=merged_storage,
                 xarray_kwargs=merged_kwargs,
                 telemetry_context=self.telemetry_context.with_updates(
                     selection={"key": key}
                 ),
                 telemetry_emitter=self.telemetry_emitter,
             )
-            result[key] = source.to_xarray()
+            ds = source.to_xarray()
+            if preprocess is not None:
+                ds = preprocess(ds)
+            result[key] = ds
         return result
 
     def to_xarray(self, **kwargs):
@@ -569,7 +696,8 @@ class IcechunkCatalog(Catalog):
 
 def _nunique(pl_df: pl.DataFrame) -> pd.Series:
     """
-    Get the number of unique values for each column a polars DataFrame.
+    Get the number of unique values for each column in a polars DataFrame.
+
     Returns a pandas Series for convenience.
     """
     return pd.Series(

@@ -5,14 +5,21 @@ from __future__ import annotations
 
 import datetime
 import json
-import os
 import typing
+from pathlib import Path
+from typing import TYPE_CHECKING
+from urllib.parse import urlparse
 
-import fsspec
+import obstore
 import pydantic
+from obstore.store import from_url as _obs_from_url
 from pydantic import ConfigDict
 
 from intake_virtual_icechunk.source._containers import VirtualChunkContainerModel
+from intake_virtual_icechunk.utils import _filter_config_args, _path_to_url
+
+if TYPE_CHECKING:
+    from obstore.store import ObjectStore
 
 
 class VirtualIcechunkCatalogModel(pydantic.BaseModel):
@@ -30,10 +37,12 @@ class VirtualIcechunkCatalogModel(pydantic.BaseModel):
 
     >>> model = VirtualIcechunkCatalogModel(
     ...     store='s3://my-bucket/my-catalog.icechunk',
+    ...     virtual_chunk_model=virtual_chunk_model,
     ...     storage_options={'from_env': True},
     ...     description='My climate catalog',
     ... )
-    >>> model.save('my-catalog', directory='/path/to/output')
+    >>> from obstore.store import from_url
+    >>> model.save('my-catalog', store=from_url('file:///path/to/output'))
 
     Load it back:
 
@@ -43,7 +52,7 @@ class VirtualIcechunkCatalogModel(pydantic.BaseModel):
     id: str = ""
     version: pydantic.StrictStr = "1.0.0"
     store: pydantic.StrictStr
-    virtual_chunk_model: VirtualChunkContainerModel
+    virtual_chunk_model: VirtualChunkContainerModel | None = None
     description: pydantic.StrictStr | None = None
     title: pydantic.StrictStr | None = None
     last_updated: datetime.datetime | datetime.date | None = None
@@ -65,23 +74,32 @@ class VirtualIcechunkCatalogModel(pydantic.BaseModel):
         json_file : str
             Path or URL to the JSON sidecar file.
         storage_options : dict, optional
-            fsspec parameters for reading the JSON file itself (e.g. S3
+            obstore config kwargs for reading the JSON file itself (e.g. S3
             credentials).  These are independent of the catalog's own
             ``storage_options``, which are stored inside the JSON and used to
             open the Icechunk store.
         """
         storage_options = storage_options or {}
-        with fsspec.open(json_file, **storage_options) as fobj:
-            data = json.loads(fobj.read())
-        return cls.model_validate(data)
+        parsed = urlparse(json_file)
+        scheme = parsed.scheme
+        if scheme in ("", "file") or (len(scheme) == 1 and scheme.isalpha()):
+            p = Path(parsed.path if scheme == "file" else json_file)
+            directory_url = _path_to_url(str(p.parent))
+            filename = p.name
+        else:
+            directory_url, filename = json_file.rsplit("/", 1)
+        obs_store = _obs_from_url(
+            directory_url, config=_filter_config_args(storage_options)
+        )
+        content = obstore.get(obs_store, filename).bytes()
+        return cls.model_validate(json.loads(bytes(content)))
 
     def save(
         self,
         name: str,
         *,
-        directory: str | None = None,
+        store: ObjectStore,
         json_dump_kwargs: dict | None = None,
-        storage_options: dict[str, typing.Any] | None = None,
     ) -> None:
         """
         Save the catalog model to a JSON sidecar file.
@@ -90,36 +108,24 @@ class VirtualIcechunkCatalogModel(pydantic.BaseModel):
         ----------
         name : str
             Stem of the output file. If it ends with '.json' it will be stripped
-            and re-!dded to ensuer we get a single `.json` ext, no matter what.
-        directory : str, optional
-            Directory or cloud storage bucket to write the file to.
-            Defaults to the current working directory.
+            and re-added to ensure we get a single `.json` ext, no matter what.
+        store : ObjectStore
+            An obstore store (e.g. ``S3Store``, ``LocalStore``) pointing at the
+            directory into which the sidecar should be written.
         json_dump_kwargs : dict, optional
             Additional keyword arguments forwarded to :func:`json.dump`.
-        storage_options : dict, optional
-            fsspec parameters for *writing* the JSON file (e.g. S3 credentials
-            for the sidecar file itself, independent of the catalog's own
-            ``storage_options``).
         """
-        if directory is None:
-            directory = os.getcwd()
-
         name = name.removesuffix(".json")
-
-        storage_options = storage_options or {}
-        mapper = fsspec.get_mapper(directory, **storage_options)
-        fs = mapper.fs
-        json_file_name = fs.unstrip_protocol(f"{mapper.root}/{name}.json")
 
         data = self.model_dump().copy()
         data["id"] = name
         data["last_updated"] = datetime.datetime.now().isoformat()
 
-        with fs.open(json_file_name, "w") as outfile:
-            json_kwargs: dict[str, typing.Any] = {"indent": 2, "default": str}
-            json_kwargs |= json_dump_kwargs or {}
-            json.dump(data, outfile, **json_kwargs)
+        json_kwargs: dict[str, typing.Any] = {"indent": 2, "default": str}
+        json_kwargs |= json_dump_kwargs or {}
+        content = json.dumps(data, **json_kwargs).encode()
 
-        print(
-            f"Successfully wrote Virtual Icechunk catalog json file to: {json_file_name}"
-        )
+        path = f"{name}.json"
+        obstore.put(store, path, content)
+
+        print(f"Successfully wrote Virtual Icechunk catalog json file to: {path}")

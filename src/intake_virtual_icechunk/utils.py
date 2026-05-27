@@ -3,7 +3,9 @@ Copyright 2026 ACCESS-NRI and contributors. See the top-level COPYRIGHT file for
 SPDX-License-Identifier: Apache-2.0
 """
 
+import copy
 import os
+import posixpath
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -106,7 +108,7 @@ def _resolve_store(
     parsed = urlparse(paths[0])
     scheme = parsed.scheme
 
-    if scheme in ("", "file") or (len(scheme) == 1 and scheme.isalpha()):
+    if scheme in ("", "file"):
         # Normalise all paths to bare POSIX paths so commonpath works uniformly.
         local_paths = [
             urlparse(p).path if urlparse(p).scheme == "file" else os.path.abspath(p)
@@ -122,13 +124,15 @@ def _resolve_store(
 
     bucket = parsed.netloc
 
+    # Remove icechunk specific options, so that obstore can use the same config.
+    # Should be fine - if it needs changing later so be it.
+    obstore_config = _filter_config_args(store_options)
+
     if scheme == "s3":
         url_prefix = f"s3://{bucket}/"
         store = S3Store.from_url(  # type: ignore[assignment]
-            f"{bucket}",
-            endpoint=store_options.get("endpoint", None),
-            access_key_id=store_options.get("access_key_id", None),
-            secret_access_key=store_options.get("secret_access_key", None),
+            url_prefix,
+            config=obstore_config,
         )
         return ObjectStoreRegistry({url_prefix: store}), url_prefix
     elif scheme in ("gs", "gcs"):
@@ -137,9 +141,7 @@ def _resolve_store(
         )
         store = GCSStore.from_url(
             f"{bucket}",
-            endpoint=store_options.get("endpoint", None),
-            access_key_id=store_options.get("access_key_id", None),
-            secret_access_key=store_options.get("secret_access_key", None),
+            config=obstore_config,
         )
     elif scheme in ("az", "abfs"):
         raise NotImplementedError(
@@ -147,10 +149,7 @@ def _resolve_store(
         )
         return AzureStore.from_url(
             f"{bucket}",
-            account=store_options.get("account", None),
-            endpoint=store_options.get("endpoint", None),
-            access_key_id=store_options.get("access_key_id", None),
-            secret_access_key=store_options.get("secret_access_key", None),
+            config=store_options,
         )
 
     return ObjectStoreRegistry({f"{bucket}": store})
@@ -161,25 +160,188 @@ def _resolve_store(
     )
 
 
+_VCC_SAFE_KWARGS: frozenset[str] = frozenset(
+    {
+        "endpoint_url",
+        "endpoint",
+        "allow_http",
+        "region",
+        "s3_compatible",
+        "force_path_style",
+        "anonymous",
+    }
+)
+"""
+The set of keyword-argument names from ``store_options`` that are safe to
+serialise into the catalog JSON sidecar for a virtual chunk container.  Only
+non-credential, non-secret config (e.g. endpoint URL, HTTP flag) is included;
+credentials must always come from the runtime environment.
+"""
+
+
 def _intake_cat_filename(store_path: Path | str) -> str:
     """
     Generate a JSON sidecar filename for an Icechunk store.
 
     The sidecar is named ``_intake_{store_name}.json``, where ``store_name`` is
-    the stem of the store path (i.e. the filename without extension).  This
-    ensures that the sidecar is easily identifiable and avoids potential
-    conflicts with other files in the same directory.
+    the stem of the store path (i.e. the last path component without its
+    extension).  Uses ``posixpath`` so cloud URIs such as ``s3://bucket/my.icechunk``
+    are handled correctly without mangling the ``://`` separator.
 
     Parameters
     ----------
     store_path : str
-        The path to the Icechunk store (e.g. ``/path/to/store.icechunk``).
+        The path or URI to the Icechunk store (e.g. ``/path/to/store.icechunk``
+        or ``s3://bucket/store.icechunk``).
 
     Returns
     -------
     str
         The generated sidecar filename (e.g. ``_intake_store.json``).
     """
+    basename = posixpath.basename(str(store_path).rstrip("/"))
+    stem = posixpath.splitext(basename)[0]
+    return f"_intake_{stem}.json"
 
-    store_path_obj = Path(store_path)
-    return f"_intake_{store_path_obj.stem}.json"
+
+def _sidecar_url(store_path: Path | str) -> str:
+    """
+    Return the full URL / path of the JSON sidecar file for the given store.
+
+    For local paths the result is an absolute POSIX path string; for cloud
+    URIs (``s3://``, ``gs://``, ``az://``) the result is a cloud URL with the
+    sidecar filename appended.  Unlike ``Path`` joining, this function never
+    mangles the ``://`` separator in cloud URIs.
+
+    Parameters
+    ----------
+    store_path : str or Path
+        The path or URI to the Icechunk store.
+
+    Returns
+    -------
+    str
+    """
+    store_str = str(store_path)
+    parsed = urlparse(store_str)
+    scheme = parsed.scheme
+    fname = _intake_cat_filename(store_str)
+
+    if scheme in ("", "file") or (len(scheme) == 1 and scheme.isalpha()):
+        if scheme == "file":
+            # file:// URI — string-join so that ``file:///path`` is not mangled
+            # to ``file:/path`` by Path() on POSIX.
+            return f"{store_str.rstrip('/')}/{fname}"
+        else:
+            # Bare local path (or Windows drive letter) — Path() is safe here.
+            return str(Path(store_str).expanduser() / fname)
+    else:
+        # Cloud URI — avoid Path which collapses ``://`` to ``:/``.
+        return f"{store_str.rstrip('/')}/{fname}"
+
+
+def _resolve_vcc_store(url_prefix: str, store_options: dict) -> Any:
+    """
+    Resolve a ``url_prefix`` (as returned by :func:`_resolve_store`) to an
+    ``icechunk.ObjectStoreConfig`` suitable for use in a
+    ``VirtualChunkContainer``.
+
+    Only non-credential keys from *store_options* are forwarded to the
+    icechunk factory (see :data:`_VCC_SAFE_KWARGS`).  Credentials must be
+    supplied separately via ``icechunk.containers_credentials`` at runtime.
+
+    Parameters
+    ----------
+    url_prefix : str
+        The canonical URL prefix for the source data, e.g. ``"file:///g/data/"``,
+        ``"s3://my-bucket/"``.
+    store_options : dict
+        Options for the object-store backend.  Non-credential keys (endpoint
+        URL, ``allow_http``, ``region``) are forwarded; credential keys are
+        ignored.
+
+    Returns
+    -------
+    icechunk.ObjectStoreConfig
+    """
+
+    safe_opts = {k: v for k, v in store_options.items() if k in _VCC_SAFE_KWARGS}
+
+    parsed = urlparse(url_prefix)
+    scheme = parsed.scheme
+
+    if scheme in ("", "file") or (len(scheme) == 1 and scheme.isalpha()):
+        path = parsed.path if scheme == "file" else url_prefix
+        return icechunk.local_filesystem_store(path)
+
+    elif scheme == "s3":
+        return icechunk.s3_store(**safe_opts)
+
+    elif scheme in ("gs", "gcs"):
+        raise NotImplementedError(
+            "GCS virtual chunk containers are not yet supported. "
+            "Please open an issue if you need this."
+        )
+
+    elif scheme in ("az", "abfs"):
+        raise NotImplementedError(
+            "Azure virtual chunk containers are not yet supported. "
+            "Please open an issue if you need this."
+        )
+
+    raise ObjectStoreError(
+        f"Unsupported URL prefix scheme: {scheme!r}. "
+        "Expected a local path, file://, or s3://."
+    )
+
+
+def _path_to_url(path: str | Path) -> str:
+    """
+    Ensure a path has a URL scheme, converting bare local paths to ``file://`` URLs.
+
+    obstore's ``from_url`` requires an explicit scheme; bare POSIX paths such as
+    ``/tmp/store`` are rejected as "relative URL without a base".  This helper
+    normalises them to ``file:///tmp/store`` while leaving cloud URLs (``s3://``,
+    ``gs://``, ``az://``) and already-correct ``file://`` URLs unchanged.
+
+    ``os.path.abspath`` is applied so that relative paths (e.g. used in tests
+    or notebooks) are also resolved correctly.
+    """
+    path_str = str(path)
+    parsed = urlparse(path_str)
+    scheme = parsed.scheme
+
+    # Already has a recognised URL scheme — return as-is.
+    if scheme == "file" or (len(scheme) > 1 and scheme not in ("",)):
+        return path_str
+
+    # Bare local path (no scheme, or single-char Windows drive letter).
+    abs_path = os.path.abspath(path_str)
+    return f"file://{abs_path}"
+
+
+def _filter_config_args(store_options: dict) -> dict:
+    """
+    Translate icechunk-style storage options to obstore config kwargs.
+
+    Keys that are icechunk-specific (not understood by obstore) are dropped.
+    ``endpoint_url`` is renamed to ``endpoint``.  ``anonymous`` is renamed to
+    ``skip_signature`` and only included when it was explicitly set.
+    """
+
+    obstore_opts = copy.deepcopy(store_options)
+
+    icechunk_specific_keys = {
+        "s3_compatible",
+        "force_path_style",
+        "anonymous",
+        "from_env",
+    }
+
+    if "endpoint_url" in obstore_opts:
+        obstore_opts["endpoint"] = obstore_opts.pop("endpoint_url")
+
+    if "anonymous" in obstore_opts:
+        obstore_opts["skip_signature"] = obstore_opts.pop("anonymous")
+
+    return {k: v for k, v in obstore_opts.items() if k not in icechunk_specific_keys}

@@ -22,7 +22,11 @@ requirements:
   run:
     - python >=3.12
     {% for dep in deps %}
+    {% if dep == "obspec-utils" %}
+    - obspec_utils
+    {% else %}
     - {{ dep }}
+    {% endif %}
     {% endfor %}
 
 test:

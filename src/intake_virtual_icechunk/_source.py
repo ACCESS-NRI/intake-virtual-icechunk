@@ -85,8 +85,8 @@ class IcechunkDataSource(DataSource):
     def ds(self) -> xr.Dataset:
         """The xarray Dataset for this data source."""
         if self._ds is None:
-            ds = self._open_dataset()
-        return ds
+            self._ds = self._open_dataset()
+        return self._ds
 
     def _get_schema(self) -> Schema:
         if self._schema is None:  # type: ignore[has-type]
@@ -140,4 +140,5 @@ class IcechunkDataSource(DataSource):
     def close(self) -> None:
         """Drop the open dataset from memory."""
         self._ds = None
+        self.__dict__.pop("ds", None)
         self._schema = None
