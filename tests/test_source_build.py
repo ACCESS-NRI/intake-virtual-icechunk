@@ -803,7 +803,9 @@ class TestZarrIcechunkStoreBuilder:
         )
 
         assert builder._esm_ds is None
-        assert builder.xarray_kwargs == {}
+
+        n_datasets = len(builder.esm_ds)
+        assert builder.xarray_kwargs == [{} for _ in range(n_datasets)]
         assert builder.storage_options == {}
         assert builder.drop_cols == []
         assert builder.cols_to_deiter == []
@@ -820,7 +822,10 @@ class TestZarrIcechunkStoreBuilder:
             xarray_kwargs={"decode_times": False},
         )
 
-        assert builder.xarray_kwargs == {"decode_times": False}
+        n_datasets = len(builder.esm_ds)
+        assert builder.xarray_kwargs == [
+            {"decode_times": False} for _ in range(n_datasets)
+        ]
 
     def test_repr_defaults(self, local_om2_datastore_path, intake_esm_kwargs, tmpdir):
         """__repr__ should show all fields and start with the class name."""

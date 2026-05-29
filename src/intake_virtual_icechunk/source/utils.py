@@ -2,7 +2,7 @@ from __future__ import annotations
 
 # Copyright 2026 ACCESS-NRI and contributors. See the top-level COPYRIGHT file for details.
 # SPDX-License-Identifier: Apache-2.0
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import pandas as pd
@@ -65,6 +65,7 @@ class GroupEntry:
 
     public_key: str
     group_attrs: dict[str, Any]
+    xarray_kwargs: dict = field(default_factory=dict)
     metadata_df: pd.DataFrame | None = None
     source_file_paths: list[str] | None = None
 
@@ -76,6 +77,7 @@ class GroupEntry:
         group_df: pd.DataFrame,
         groupby_attrs: list[str],
         assets_col: str,
+        xarray_kwargs: dict = {},
     ) -> GroupEntry:
         """Construct a builder entry from one grouped intake-esm dataframe slice."""
 
@@ -90,6 +92,7 @@ class GroupEntry:
             group_attrs=group_attrs,
             metadata_df=group_df,
             source_file_paths=file_paths,
+            xarray_kwargs=xarray_kwargs,
         )
 
     @property
