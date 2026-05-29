@@ -278,6 +278,7 @@ class TestVirtualIcechunkStoreBuilder(BuilderTests):
         )
 
         assert entry.public_key == public_key
+        assert entry.has_metadata_df is True
         assert entry.group_df is group_df
         assert entry.file_paths == group_df[structure.assets_col].tolist()
         assert set(entry.group_attrs).issubset(set(group_df.columns))
@@ -291,6 +292,9 @@ class TestVirtualIcechunkStoreBuilder(BuilderTests):
             public_key="bar", group_attrs={}, source_file_paths=["a"]
         )
 
+        assert missing_paths.has_metadata_df is True
+        assert missing_metadata.has_metadata_df is False
+
         with pytest.raises(GroupEntryError, match="does not include source file paths"):
             _ = missing_paths.file_paths
 
@@ -298,6 +302,34 @@ class TestVirtualIcechunkStoreBuilder(BuilderTests):
             GroupEntryError, match="does not include a metadata dataframe"
         ):
             _ = missing_metadata.group_df
+
+    def test_attach_entry_metadata_without_group_df_uses_group_attrs(self, tmpdir):
+        """Reduced-metadata entries should still attach searchable group attrs."""
+        dummy_store_path = tmpdir / "dummy_store.icechunk"
+        builder = IcechunkStoreBuilder(
+            esm_datastore_path="dummy.json",
+            icechunk_store_path=dummy_store_path,
+            drop_cols=["path"],
+        )
+        entry = GroupEntry(
+            public_key="foo",
+            group_attrs={
+                "source_id": "demo",
+                "experiment_id": "hist",
+                "path": "drop-me",
+            },
+            source_file_paths=["a"],
+        )
+
+        zarr_group = MagicMock()
+        zarr_group.attrs = {}
+
+        builder._attach_entry_metadata(zarr_group, entry)
+
+        assert zarr_group.attrs == {
+            "source_id": "demo",
+            "experiment_id": "hist",
+        }
 
     def test_iter_esm_groups(self, local_om2_datastore_path, intake_esm_kwargs, tmpdir):
         """The shared ESM iterator should yield one structured entry per catalog key."""
