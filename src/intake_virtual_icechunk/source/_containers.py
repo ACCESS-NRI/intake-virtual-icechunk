@@ -42,17 +42,15 @@ _store_types = [
 # TODO: Probably replace this with a pydantic model down the line...
 @dataclass
 class VirtualChunkContainerModel:
-    """
-    A dataclass representing the configuration of an IceChunk VirtualChunkContainer,
-    for the purpose of serialisation in the catalog JSON. This allows us to come
-    back and reinstantiate the same VirtualChunkContainer when we open the store later,
-    without having to set the virtual chunk configuration again - which the safe
-    by default behaviour of IceChunk would otherwise require.
+    """Serializable VirtualChunkContainer configuration for catalog sidecars.
 
-    This *is* a hack, in some sense. It is unsafe by default, but we are writing
-    Python here, not Rust. The aim is to make it easy for a user to use a virtualised
-    icechunk store without having to understand or even know about virtualisation
-    or whatnot.
+    Icechunk requires virtual chunk access to be configured explicitly when a
+    repository is reopened. This model stores the non-secret parts of that
+    configuration in the catalog JSON sidecar so read-side consumers can
+    reconstruct an equivalent ``VirtualChunkContainer`` later.
+
+    Only explicitly safe kwargs are preserved in ``open_kwargs``; credential-like
+    values are intentionally omitted from the serialised form.
     """
 
     url_prefix: str
@@ -64,6 +62,16 @@ class VirtualChunkContainerModel:
         vc_container: VirtualChunkContainer,
         store_options: dict | None = None,
     ) -> VirtualChunkContainerModel:
+        """Build a serialisable model from a live Icechunk container.
+
+        Parameters
+        ----------
+        vc_container
+            The configured Icechunk virtual chunk container.
+        store_options
+            Source-store options from the builder. Only keys listed in
+            ``_VCC_SAFE_KWARGS`` are retained in the serialised output.
+        """
         # Filter to only non-credential, serialisable keys so that config such
         # as a custom endpoint URL survives a round-trip through the JSON sidecar
         # without storing secrets.
@@ -77,20 +85,14 @@ class VirtualChunkContainerModel:
         )
 
     def to_virtual_chunk_container(self) -> VirtualChunkContainer:
-        """
-        Create an IceChunk VirtualChunkContainer from this model. Note - the
-        mypy type: ignore below is a typing issue in icechunk, really. Maybe push
-        a fix?
-        """
+        """Recreate an Icechunk ``VirtualChunkContainer`` from this model."""
         return VirtualChunkContainer(
             url_prefix=self.url_prefix,
             store=self._build_object_store_config(),  # type: ignore
         )
 
     def _build_object_store_config(self) -> ObjectStoreConfig:
-        """
-        Recreate the icechunk ObjectStoreConfig from the store_type and open_kwargs.
-        """
+        """Recreate the Icechunk object-store config for this container model."""
         store_type = STORE_TYPE_MAP.get(self.store_type, None)
 
         if store_type is None:
@@ -100,15 +102,13 @@ class VirtualChunkContainerModel:
         return store_type(**self.open_kwargs)
 
     def to_dict(self) -> dict:
-        """
-        Dump the model to a dictionary for serialisation as JSON.
-        """
+        """Return a plain dictionary suitable for JSON serialisation."""
         return asdict(self)
 
     @classmethod
     def from_dict(cls, d: dict | None) -> VirtualChunkContainerModel | None:
-        """
-        Create a VirtualChunkContainerModel from a dictionary (e.g. from JSON).
+        """Construct the model from a dictionary, typically decoded from JSON.
+
         Returns ``None`` if *d* is ``None``.
         """
         if d is None:

@@ -49,6 +49,16 @@ class GroupEntryError(IcechunkBuildError):
 
 @dataclass
 class DataStoreStructure:
+    """Minimal structural metadata extracted from an intake-esm catalog.
+
+    Attributes
+    ----------
+    groupby_attrs
+        Columns that define each logical dataset grouping.
+    assets_col
+        Column containing the asset URLs or paths for each grouped dataset.
+    """
+
     groupby_attrs: list[str]
     assets_col: str
 

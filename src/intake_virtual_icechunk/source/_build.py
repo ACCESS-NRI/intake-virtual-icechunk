@@ -146,10 +146,10 @@ class AbstractIcechunkStoreBuilder(abc.ABC):
         return self._xarray_kwargs
 
     def _extract_datastore_structure(self) -> DataStoreStructure:
-        """
-        Grab the groupby_attrs and assets column name from the intake-esm catalog,
-        which we use to build the icechunk store and populate .zattrs.
-        We need these for both the build process and to populate the catalog metadata.
+        """Extract the grouping columns and asset column from the datastore.
+
+        These fields drive both the physical group layout written into the
+        Icechunk repository and the searchable metadata attached to each group.
         """
         esmcat = self.esm_ds.esmcat
         agg_control = esmcat.aggregation_control
@@ -278,6 +278,9 @@ class AbstractIcechunkStoreBuilder(abc.ABC):
         configured iterable columns are collapsed to scalars. Values from the
         exploded catalog metadata take precedence over ``group_attrs`` so richer
         per-asset metadata is preserved where both sources provide a value.
+
+        Any remaining columns that still are not represented in ``zarr_group``
+        attributes are backfilled from the first row of the grouped dataframe.
         """
         group_df = group_df.drop(columns=self.drop_cols, errors="ignore")
 
@@ -394,6 +397,12 @@ class VirtualIcechunkStoreBuilder(AbstractIcechunkStoreBuilder):
         cols_to_deiter: list[str] | None = None,
         xarray_kwargs: list[dict] | dict | None = None,
     ):
+        """Initialise a builder for one intake-esm -> virtual Icechunk conversion.
+
+        The parser is instantiated eagerly. If ``parser`` is not provided, the
+        builder infers a VirtualiZarr parser class from the intake-esm catalog's
+        declared asset format and then instantiates it.
+        """
         super().__init__(
             esm_datastore_path=esm_datastore_path,
             icechunk_store_path=icechunk_store_path,
@@ -551,6 +560,13 @@ class VirtualIcechunkStoreBuilder(AbstractIcechunkStoreBuilder):
         The group name for each dataset is derived from the catalog's
         ``groupby_attrs``, so the Icechunk store structure mirrors the
         intake-esm grouping.
+
+        Notes
+        -----
+        The current implementation records per-group failures in
+        ``self.failed_list`` and continues building the remaining groups.
+        It also persists a JSON sidecar inside the target store so the catalog
+        can be reopened later without re-supplying virtual chunk configuration.
         """
         from intake_virtual_icechunk.cat import VirtualIcechunkCatalogModel
 
@@ -659,6 +675,7 @@ class IcechunkStoreBuilder(AbstractIcechunkStoreBuilder):
         drop_cols: list[str] | None = None,
         cols_to_deiter: list[str] | None = None,
     ):
+        """Initialise a builder that copies real data into the Icechunk store."""
         super().__init__(
             esm_datastore_path=esm_datastore_path,
             icechunk_store_path=icechunk_store_path,
@@ -731,6 +748,12 @@ class IcechunkStoreBuilder(AbstractIcechunkStoreBuilder):
         :meth:`~intake_virtual_icechunk.core.IcechunkCatalog.from_json`.
         The sidecar does **not** contain a virtual chunk container entry
         because the store holds real data chunks.
+
+        Notes
+        -----
+        Like the virtual builder path, this implementation records per-group
+        failures in ``self.failed_list`` and continues building the remaining
+        groups.
         """
         from intake_virtual_icechunk.cat import VirtualIcechunkCatalogModel
 
