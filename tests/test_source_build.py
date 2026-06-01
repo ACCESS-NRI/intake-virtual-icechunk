@@ -748,6 +748,63 @@ class TestVirtualIcechunkStoreBuilder(BuilderTests):
         assert len(builder.failed_list) == len(builder.esm_ds.keys())
         assert set(fl[0] for fl in builder.failed_list) == set(builder.esm_ds.keys())
 
+    @pytest.mark.parametrize(
+        "xr_kwargs",
+        [None, {"decode_cf": True}, [{"decode_cf": True}, {"decode_times": True}]],
+    )
+    def test_init_xarray_kwargs(
+        self,
+        local_om2_datastore_path,
+        intake_esm_kwargs,
+        tmpdir,
+        xr_kwargs,
+    ):
+        """
+        Test that we can initialise and pass through the xarray kwargs corerctly.
+        This behaviour is defined on the ABC, so we only need to test it on one
+        of the child classes
+        """
+        dummy_store_path = tmpdir / "dummy_store.icechunk"
+        builder = VirtualIcechunkStoreBuilder(
+            esm_datastore_path=local_om2_datastore_path,
+            icechunk_store_path=dummy_store_path,
+            esm_datastore_kwargs=intake_esm_kwargs,
+            xarray_kwargs=xr_kwargs,
+        )
+        if xr_kwargs is None:
+            assert builder.xarray_kwargs == [{} for _ in builder.esm_ds]
+        elif isinstance(xr_kwargs, dict):
+            assert builder.xarray_kwargs == [xr_kwargs for _ in builder.esm_ds]
+        elif isinstance(xr_kwargs, list):
+            assert builder.xarray_kwargs == xr_kwargs
+
+    @patch("intake_virtual_icechunk.source._build.open_virtual_mfdataset")
+    def test_build_nested(
+        self,
+        mock_open_virtual_mfdataset,
+        local_om2_datastore_path,
+        intake_esm_kwargs,
+        tmpdir,
+    ):
+        """
+        Test that we can initialise and pass through the xarray kwargs corerctly.
+        This behaviour is defined on the ABC, so we only need to test it on one
+        of the child calssed
+        """
+        dummy_store_path = tmpdir / "dummy_store.icechunk"
+        builder = VirtualIcechunkStoreBuilder(
+            esm_datastore_path=local_om2_datastore_path,
+            icechunk_store_path=dummy_store_path,
+            esm_datastore_kwargs=intake_esm_kwargs,
+            xarray_kwargs={"combine": "nested"},
+        )
+        builder.build()
+
+        assert mock_open_virtual_mfdataset.call_count == len(builder.esm_ds)
+        for call in mock_open_virtual_mfdataset.call_args_list:
+            _, kwargs = call
+            assert kwargs["combine"] == "nested"
+
 
 class TestIcechunkStoreBuilderIsAbstract:
     """Verify that IcechunkStoreBuilder cannot be instantiated directly."""
@@ -803,7 +860,9 @@ class TestZarrIcechunkStoreBuilder:
         )
 
         assert builder._esm_ds is None
-        assert builder.xarray_kwargs == {}
+
+        n_datasets = len(builder.esm_ds)
+        assert builder.xarray_kwargs == [{} for _ in range(n_datasets)]
         assert builder.storage_options == {}
         assert builder.drop_cols == []
         assert builder.cols_to_deiter == []
@@ -820,7 +879,10 @@ class TestZarrIcechunkStoreBuilder:
             xarray_kwargs={"decode_times": False},
         )
 
-        assert builder.xarray_kwargs == {"decode_times": False}
+        n_datasets = len(builder.esm_ds)
+        assert builder.xarray_kwargs == [
+            {"decode_times": False} for _ in range(n_datasets)
+        ]
 
     def test_repr_defaults(self, local_om2_datastore_path, intake_esm_kwargs, tmpdir):
         """__repr__ should show all fields and start with the class name."""

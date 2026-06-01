@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import abc
 from collections.abc import Generator, Iterable, Mapping
+from functools import cached_property
 
 # Copyright 2026 ACCESS-NRI and contributors. See the top-level COPYRIGHT file for details.
 # SPDX-License-Identifier: Apache-2.0
@@ -92,6 +93,13 @@ class AbstractIcechunkStoreBuilder(abc.ABC):
     cols_to_deiter : list[str], optional
         Columns whose deduplicated iterable metadata should be stored as a
         scalar by taking the first value.
+    xarray_kwargs: list[dict] | dict | None
+        Passed to virtualizarr.open_virtual_mfdataset/open_virtual_dataset. If
+        a list of dicts is passed, it must be the same length as the number of
+        datasets in the datastore, and will be applied per dataset. If a single
+        dict is passed, the same args will be passed to each dataset. If None,
+        default arguments will be used.
+
     """
 
     def __init__(
@@ -103,6 +111,7 @@ class AbstractIcechunkStoreBuilder(abc.ABC):
         icechunk_storage_options: dict | None = None,
         drop_cols: list[str] | None = None,
         cols_to_deiter: list[str] | None = None,
+        xarray_kwargs: list[dict] | dict | None = None,
     ):
         self.esm_datastore_path = str(esm_datastore_path)
         self.esm_datastore_kwargs = esm_datastore_kwargs or {}
@@ -113,16 +122,28 @@ class AbstractIcechunkStoreBuilder(abc.ABC):
         self.storage_options = icechunk_storage_options or {}
         self.drop_cols = drop_cols or []
         self.cols_to_deiter = cols_to_deiter or []
+        self._xarray_kwargs = xarray_kwargs or {}
 
     @property
     def esm_ds(self) -> esm_datastore:
         """Lazily open and cache the intake-esm datastore."""
 
         if self._esm_ds is None:
-            self._esm_ds = intake.open_esm_datastore(
+            self._esm_ds = intake.open_esm_datastore(  # type: ignore[assignment]
                 self.esm_datastore_path, **self.esm_datastore_kwargs
             )
-        return self._esm_ds
+        return self._esm_ds  # type: ignore[union-attr]
+
+    @cached_property
+    def xarray_kwargs(self) -> list[dict]:
+        """Return user defined xarray kwargs, promoted to a list the same length as the datastore
+
+        TODO: This should probably be a dict, not a list, because IDK if the datastore iteration is
+        stable.
+        """
+        if isinstance(self._xarray_kwargs, dict):
+            return [self._xarray_kwargs for _ in self.esm_ds]
+        return self._xarray_kwargs
 
     def _extract_datastore_structure(self) -> DataStoreStructure:
         """
@@ -146,19 +167,25 @@ class AbstractIcechunkStoreBuilder(abc.ABC):
         return structure
 
     def _iter_esm_groups(self) -> Generator[GroupEntry, None, None]:
-        """Yield one logical dataset-group entry from the intake-esm catalog."""
+        """Yield one logical dataset-group entry from the intake-esm catalog.
+
+        Xarray opening kwargs will be folded in for each entry.
+        """
 
         esmcat = self.esm_ds.esmcat
         structure = self._prepare_group_iteration()
         grouped = esmcat.grouped
 
-        for public_key, internal_key in esmcat._construct_group_keys().items():
+        for (public_key, internal_key), kwargs in zip(
+            esmcat._construct_group_keys().items(), self.xarray_kwargs
+        ):
             group_df: pd.DataFrame = grouped.get_group(internal_key)
             yield GroupEntry.from_esm_group(
                 public_key=public_key,
                 group_df=group_df,
                 groupby_attrs=structure.groupby_attrs,
                 assets_col=structure.assets_col,
+                xarray_kwargs=kwargs,
             )
 
     @abc.abstractmethod
@@ -345,6 +372,13 @@ class VirtualIcechunkStoreBuilder(AbstractIcechunkStoreBuilder):
     cols_to_deiter : list[str], optional
         Columns whose deduplicated iterable metadata should be stored as a
         scalar by taking the first value.
+    xarray_kwargs: list[dict] | dict | None
+        Passed to virtualizarr.open_virtual_mfdataset/open_virtual_dataset. If
+        a list of dicts is passed, it must be the same length as the number of
+        datasets in the datastore, and will be applied per dataset. If a single
+        dict is passed, the same args will be passed to each dataset. If None,
+        default arguments will be used.
+
     """
 
     def __init__(
@@ -358,6 +392,7 @@ class VirtualIcechunkStoreBuilder(AbstractIcechunkStoreBuilder):
         icechunk_store_options: dict | None = None,
         drop_cols: list[str] | None = None,
         cols_to_deiter: list[str] | None = None,
+        xarray_kwargs: list[dict] | dict | None = None,
     ):
         super().__init__(
             esm_datastore_path=esm_datastore_path,
@@ -366,6 +401,7 @@ class VirtualIcechunkStoreBuilder(AbstractIcechunkStoreBuilder):
             icechunk_storage_options=icechunk_storage_options,
             drop_cols=drop_cols,
             cols_to_deiter=cols_to_deiter,
+            xarray_kwargs=xarray_kwargs,
         )
         self.store_options = icechunk_store_options or {}
         parser = parser or self._infer_parser()
@@ -382,6 +418,7 @@ class VirtualIcechunkStoreBuilder(AbstractIcechunkStoreBuilder):
             f"\n\tstore_options={self.store_options}, "
             f"\n\tdrop_cols={self.drop_cols}, "
             f"\n\tcols_to_deiter={self.cols_to_deiter}"
+            f"\n\txarray_kwargs={self._xarray_kwargs},"
             "\n)"
         )
 
@@ -456,27 +493,28 @@ class VirtualIcechunkStoreBuilder(AbstractIcechunkStoreBuilder):
     def _write_entry(self, store: icechunk.IcechunkStore, entry: GroupEntry) -> None:
         """Write one virtualized group into an open Icechunk transaction."""
 
+        # Are these defaults too opinionated?  Maybe we should have a narrower set
+        # of defaults or have a total override if the user provides any xarray kwargs?
+        default_kwargs = dict(
+            parser=self.parser,
+            registry=self.obstore_registry,
+            parallel="dask",
+            decode_times=False,
+            coords="minimal",
+            compat="override",
+        )
+
+        open_kwargs = {**default_kwargs, **entry.xarray_kwargs}
         try:
-            with open_virtual_mfdataset(
-                urls=entry.file_paths,
-                parser=self.parser,
-                registry=self.obstore_registry,
-                parallel="dask",
-                decode_times=False,
-                coords="minimal",
-                compat="override",
-            ) as vds:
+            with open_virtual_mfdataset(urls=entry.file_paths, **open_kwargs) as vds:
                 vds.vz.to_icechunk(store, group=entry.public_key)
         except Exception as exc:
             if not self._is_concat_dim_order_error(exc):
                 raise exc
 
-            with open_virtual_dataset(
-                url=entry.file_paths[0],
-                parser=self.parser,
-                registry=self.obstore_registry,
-                decode_times=False,
-            ) as vds:
+            open_kwargs = _filter_kwargs(open_kwargs)
+
+            with open_virtual_dataset(url=entry.file_paths[0], **open_kwargs) as vds:
                 vds.vz.to_icechunk(store, group=entry.public_key)
 
         # Write group metadata into .zattrs so the catalog can search
@@ -602,6 +640,12 @@ class IcechunkStoreBuilder(AbstractIcechunkStoreBuilder):
     cols_to_deiter : list[str], optional
         Columns whose deduplicated iterable metadata should be stored as a
         scalar by taking the first value.
+    xarray_kwargs: list[dict] | dict | None
+        Passed to xarray.open_mfdataset/open_dataset. If a list of dicts is passed,
+        it must be the same length as the number of datasets in the datastore,
+        and will be applied per dataset. If a single dict is passed, the same
+        args will be passed to each dataset. If None, default arguments will be
+        used. Combine related kwargs are dropped if passed to open_dataset.
     """
 
     def __init__(
@@ -611,7 +655,7 @@ class IcechunkStoreBuilder(AbstractIcechunkStoreBuilder):
         icechunk_store_path: Path | str,
         esm_datastore_kwargs: dict | None = None,
         icechunk_storage_options: dict | None = None,
-        xarray_kwargs: dict | None = None,
+        xarray_kwargs: list[dict] | dict | None = None,
         drop_cols: list[str] | None = None,
         cols_to_deiter: list[str] | None = None,
     ):
@@ -622,8 +666,8 @@ class IcechunkStoreBuilder(AbstractIcechunkStoreBuilder):
             icechunk_storage_options=icechunk_storage_options,
             drop_cols=drop_cols,
             cols_to_deiter=cols_to_deiter,
+            xarray_kwargs=xarray_kwargs,
         )
-        self.xarray_kwargs = xarray_kwargs or {}
 
     def __repr__(self) -> str:
         """Return a multiline representation showing the builder configuration."""
@@ -631,7 +675,7 @@ class IcechunkStoreBuilder(AbstractIcechunkStoreBuilder):
             "ZarrIcechunkStoreBuilder("
             f"\n\tesm_datastore_path='{self.esm_datastore_path}', "
             f"\n\ticechunk_store_path='{self.store_path}', "
-            f"\n\txarray_kwargs={self.xarray_kwargs}, "
+            f"\n\txarray_kwargs={self._xarray_kwargs}, "
             f"\n\tstorage_options={self.storage_options}, "
             f"\n\tdrop_cols={self.drop_cols}, "
             f"\n\tcols_to_deiter={self.cols_to_deiter}"
@@ -647,26 +691,13 @@ class IcechunkStoreBuilder(AbstractIcechunkStoreBuilder):
         """Write one real-data group into an open Icechunk transaction."""
 
         try:
-            with xr.open_mfdataset(entry.file_paths, **self.xarray_kwargs) as ds:
+            with xr.open_mfdataset(entry.file_paths, **entry.xarray_kwargs) as ds:
                 to_icechunk(ds, store.session, group=entry.public_key, mode="a")
         except Exception as exc:
             if not self._is_concat_dim_order_error(exc):
                 raise exc
 
-            # Filter out mfdataset specific kwargs that would cause the single-dataset open to fail
-            kwargs = {
-                k: v
-                for k, v in self.xarray_kwargs.items()
-                if k
-                not in [
-                    "parallel",
-                    "coords",
-                    "compat",
-                    "combine_attrs",
-                    "join",
-                    "concat_dim",
-                ]
-            }
+            kwargs = _filter_kwargs(entry.xarray_kwargs)
             with xr.open_dataset(
                 entry.file_paths[0],
                 **kwargs,
@@ -728,3 +759,20 @@ class IcechunkStoreBuilder(AbstractIcechunkStoreBuilder):
             config=_filter_config_args(self.storage_options),
         )
         model.save(sidecar_fname, store=sidecar_store)
+
+
+def _filter_kwargs(kwargs: dict) -> dict:
+    """Filter out mfdataset specific kwargs that would cause the single-dataset open to fail"""
+    return {
+        k: v
+        for k, v in kwargs.items()
+        if k
+        not in [
+            "parallel",
+            "coords",
+            "compat",
+            "combine_attrs",
+            "join",
+            "concat_dim",
+        ]
+    }
