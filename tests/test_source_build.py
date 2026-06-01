@@ -755,7 +755,6 @@ class TestVirtualIcechunkStoreBuilder(BuilderTests):
     def test_init_xarray_kwargs(
         self,
         local_om2_datastore_path,
-        om2_datastore,
         intake_esm_kwargs,
         tmpdir,
         xr_kwargs,
