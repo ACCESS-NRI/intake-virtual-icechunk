@@ -515,6 +515,7 @@ class VirtualIcechunkStoreBuilder(AbstractIcechunkStoreBuilder):
             coords="minimal",
             compat="override",
             join="override",
+            combine="nested",
             loadable_variables=infer_loadable_vars(entry),
         )
 
