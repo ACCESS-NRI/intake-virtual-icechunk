@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import pandas as pd
+import xarray as xr
 
 if TYPE_CHECKING:
     from virtualizarr.parsers import (
@@ -167,7 +168,8 @@ def infer_loadable_vars(entry: GroupEntry) -> list[str]:
 
     dummy_file = entry.file_paths[0]
 
-    with xr.open_dataset(dummy_file, **entry.xarray_kwargs) as ds:
+    # Don't pass any kwargs for now... might have to change that though.
+    with xr.open_dataset(dummy_file) as ds:
         loadable_vars = [d for d in ds.coords if ds[d].ndim == 1]
 
     return loadable_vars  # type: ignore[return-value]
