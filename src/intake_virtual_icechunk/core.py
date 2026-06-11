@@ -9,6 +9,7 @@ import sys
 from collections.abc import Callable
 from functools import cached_property
 from pathlib import Path
+from uuid import uuid4
 
 import obstore
 import pandas as pd
@@ -20,6 +21,11 @@ from obstore.store import from_url as _obs_from_url
 from intake_virtual_icechunk._search import pl_search
 from intake_virtual_icechunk._source import IcechunkDataSource
 from intake_virtual_icechunk.source._containers import VirtualChunkContainerModel
+from intake_virtual_icechunk.telemetry import (
+    TelemetryContext,
+    TelemetryEmitter,
+    emit_telemetry,
+)
 from intake_virtual_icechunk.utils import (
     _filter_config_args,
     _intake_cat_filename,
@@ -142,6 +148,8 @@ class IcechunkCatalog(Catalog):
         sidecar_options=None,
         xarray_kwargs=None,
         virtual_chunk_model=None,
+        telemetry_context: TelemetryContext | None = None,
+        telemetry_emitter: TelemetryEmitter | None = None,
         catalog_id=None,
         **intake_kwargs,
     ):
@@ -179,6 +187,11 @@ class IcechunkCatalog(Catalog):
             if self.virtual_chunk_model is not None
             else None
         )
+
+        self.telemetry_context = telemetry_context or TelemetryContext(
+            store_id=self.store
+        )
+        self.telemetry_emitter = telemetry_emitter
 
         self._entries: dict[str, IcechunkDataSource] = {}
         self._allowed_keys: list[str] | None = (
@@ -246,6 +259,8 @@ class IcechunkCatalog(Catalog):
                 if parent.virtual_chunk_model is not None
                 else None
             ),
+            telemetry_context=parent.telemetry_context,
+            telemetry_emitter=parent.telemetry_emitter,
         )
         # Preserve parent metadata that is not re-read from the sidecar when
         # virtual_chunk_model is supplied (see __init__ branching logic).
@@ -405,6 +420,10 @@ class IcechunkCatalog(Catalog):
                 group=key,
                 storage_options=self.storage_options,
                 xarray_kwargs=self.xarray_kwargs,
+                telemetry_context=self.telemetry_context.with_updates(
+                    selection={"key": key}
+                ),
+                telemetry_emitter=self.telemetry_emitter,
             )
         return self._entries[key]
 
@@ -468,6 +487,19 @@ class IcechunkCatalog(Catalog):
         if not query:
             return self
 
+
+        context = self.telemetry_context.with_updates(
+            search_id=uuid4().hex,
+            search_params=dict(query),
+            search_result_count=len(matched),
+            selection=None,
+        )
+        emit_telemetry(
+            self.telemetry_emitter,
+            "catalog.search",
+            context,
+            {"query": dict(query), "result_count": len(matched)},
+        )
         colnames = set(self.df.columns)
         if not any(key in colnames for key in query.keys()):
             return IcechunkCatalog._from_parent(self, [])
@@ -482,6 +514,7 @@ class IcechunkCatalog(Catalog):
             columns_with_iterables=self.columns_with_iterables,
         )
         return IcechunkCatalog._from_parent(self, results["key"].tolist())
+
 
     def unique(self) -> pd.Series:
         """
@@ -511,6 +544,10 @@ class IcechunkCatalog(Catalog):
                 group=key,
                 storage_options=self.storage_options,
                 xarray_kwargs=self.xarray_kwargs,
+                telemetry_context=self.telemetry_context.with_updates(
+                    selection={"key": key}
+                ),
+                telemetry_emitter=self.telemetry_emitter,
             ).to_xarray()
             row: dict = {"key": key}
             row.update(
@@ -602,6 +639,10 @@ class IcechunkCatalog(Catalog):
                 group=key,
                 storage_options=merged_storage,
                 xarray_kwargs=merged_kwargs,
+                telemetry_context=self.telemetry_context.with_updates(
+                    selection={"key": key}
+                ),
+                telemetry_emitter=self.telemetry_emitter,
             )
             ds = source.to_xarray()
             if preprocess is not None:
