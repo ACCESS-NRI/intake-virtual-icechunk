@@ -552,6 +552,26 @@ class TestIcechunkCatalogDf:
         assert all(df["source_id"] == "BCC-ESM1")
 
 
+# NOTE: defined at module level (not inside TestIcechunkCatalogDf) because that
+# class declares an __init__, which makes pytest skip the whole class. This test
+# reads variable/coordinates/dimensions straight from zarr metadata, so it must
+# actually run to guard parity with the previous xr.open_zarr implementation.
+def test_df_metadata_matches_xarray(icechunk_localstore_path):
+    """The direct zarr-metadata reader must reproduce what xr.open_zarr gives.
+
+    Asserts parity (order-insensitively) against the xarray-derived ground truth
+    on real built data, covering the coordinate/data-var/dimension split.
+    """
+    cat = IcechunkCatalog(store=icechunk_localstore_path)
+    df = cat.df
+    assert set(df.columns) >= {"variable", "coordinates", "dimensions"}
+    for key in cat.keys():
+        ds = xr.open_zarr(cat._zarr_store, group=key)
+        assert set(df.loc[key, "variable"] or ()) == set(ds.data_vars)
+        assert set(df.loc[key, "coordinates"]) == set(ds.coords)
+        assert set(df.loc[key, "dimensions"]) == set(ds.dims)
+
+
 class TestIcechunkCatalogToDatasetDict:
     def test_returns_dict_of_datasets(self, icechunk_localstore_path):
         cat = IcechunkCatalog(store=icechunk_localstore_path)
