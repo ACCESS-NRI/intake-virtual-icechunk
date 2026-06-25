@@ -340,7 +340,8 @@ class TestIcechunkCatalogConstructorKwargs:
 class TestIcechunkCatalogKeys:
     """Tests for the catalog mapping-style key interface."""
 
-    def __init__(self, groups):
+    @pytest.fixture(autouse=True)
+    def _set_all_keys(self, groups):
         self.all_keys = [g["key"] for g in groups]
 
     def test_keys_returns_all_groups(self, icechunk_localstore_path):
@@ -523,19 +524,23 @@ class TestIcechunkCatalogSearch:
 class TestIcechunkCatalogDf:
     """Tests for the catalog metadata DataFrame."""
 
-    def __init__(self, groups):
+    @pytest.fixture(autouse=True)
+    def _set_all_keys(self, groups):
         self.all_keys = [g["key"] for g in groups]
 
-    def test_df_has_key_column(self, icechunk_localstore_path):
+    def test_df_key_is_index(self, icechunk_localstore_path):
         cat = IcechunkCatalog(store=icechunk_localstore_path)
         df = cat.df
-        assert "key" in df.columns
+        # df sets the group key as the index (set_index("key", drop=True)),
+        # so "key" is the index name, not a column.
+        assert df.index.name == "key"
+        assert "key" not in df.columns
 
     def test_df_has_attr_columns(self, icechunk_localstore_path):
         cat = IcechunkCatalog(store=icechunk_localstore_path)
         df = cat.df
-        assert "source_id" in df.columns
-        assert "experiment_id" in df.columns
+        assert "filename" in df.columns
+        assert "title" in df.columns
 
     def test_df_row_count(self, icechunk_localstore_path):
         cat = IcechunkCatalog(store=icechunk_localstore_path)
@@ -543,13 +548,15 @@ class TestIcechunkCatalogDf:
 
     def test_df_keys_match(self, icechunk_localstore_path):
         cat = IcechunkCatalog(store=icechunk_localstore_path)
-        assert sorted(cat.df["key"].tolist()) == sorted(self.all_keys)
+        assert sorted(cat.df.index.tolist()) == sorted(self.all_keys)
 
     def test_df_filtered_by_search(self, icechunk_localstore_path):
         cat = IcechunkCatalog(store=icechunk_localstore_path)
-        result = cat.search(source_id="BCC-ESM1")
+        filename_val = cat.df["filename"].dropna().iloc[0]
+        result = cat.search(filename=filename_val)
         df = result.df
-        assert all(df["source_id"] == "BCC-ESM1")
+        assert len(df) > 0
+        assert all(df["filename"] == filename_val)
 
 
 class TestIcechunkCatalogToDatasetDict:
