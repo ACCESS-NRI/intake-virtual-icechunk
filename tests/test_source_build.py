@@ -12,6 +12,8 @@ import pandas as pd
 import pytest
 import tlz
 import virtualizarr
+import xarray as xr
+import zarr
 from access_nri_intake.source.builders import AccessOm2Builder
 from dotenv import load_dotenv
 from intake_esm.core import esm_datastore
@@ -23,8 +25,16 @@ from intake_virtual_icechunk.source import (
     IcechunkStoreBuilder,
     VirtualIcechunkStoreBuilder,
 )
+from intake_virtual_icechunk.source._build import (
+    _normalize_size_arg,
+    _rechunk_dataset,
+    _RechunkSpec,
+)
 from intake_virtual_icechunk.source.utils import GroupEntry, GroupEntryError
-from intake_virtual_icechunk.utils import _intake_cat_filename
+from intake_virtual_icechunk.utils import (
+    _intake_cat_filename,
+    _representative_source_size,
+)
 
 __all__ = ["VirtualIcechunkStoreBuilder", "pytest"]
 
@@ -1048,6 +1058,136 @@ class TestZarrIcechunkStoreBuilder:
 
         assert len(builder.failed_list) == len(builder.esm_ds.keys())
         assert set(fl[0] for fl in builder.failed_list) == set(builder.esm_ds.keys())
+
+    # ------------------------------------------------------------------
+    # rechunk() / sharding
+    # ------------------------------------------------------------------
+
+    def _builder(self, datastore_path, esm_kwargs, store_path):
+        return IcechunkStoreBuilder(
+            esm_datastore_path=datastore_path,
+            icechunk_store_path=store_path,
+            esm_datastore_kwargs=esm_kwargs,
+        )
+
+    @staticmethod
+    def _multidim_data_arrays(store_path) -> dict:
+        """Return {path: zarr.Array} for every >=2-D array in the built store."""
+        repo = icechunk.Repository.open(
+            icechunk.local_filesystem_storage(str(store_path))
+        )
+        root = zarr.open_group(repo.readonly_session("main").store, mode="r")
+        arrays = {}
+        for gname, group in root.groups():
+            for aname, arr in group.arrays():
+                if arr.ndim >= 2:
+                    arrays[f"{gname}/{aname}"] = arr
+        return arrays
+
+    def test_rechunk_returns_self(
+        self, local_om2_datastore_path, intake_esm_kwargs, tmpdir
+    ):
+        builder = self._builder(
+            local_om2_datastore_path, intake_esm_kwargs, tmpdir / "s.icechunk"
+        )
+        assert builder.rechunk(chunks="1MiB") is builder
+        assert builder._rechunk is not None
+
+    def test_normalize_size_arg(self):
+        assert _normalize_size_arg(None, "chunks", allow_auto=True) is None
+        assert _normalize_size_arg("auto", "chunks", allow_auto=True) == "auto"
+        assert _normalize_size_arg("128", "chunks", allow_auto=True) == 128
+        assert _normalize_size_arg("128MiB", "chunks", allow_auto=True) == 128 * 1024**2
+        assert _normalize_size_arg({"time": 3}, "chunks", allow_auto=True) == {
+            "time": 3
+        }
+
+    def test_normalize_size_arg_invalid(self):
+        with pytest.raises(ValueError):
+            _normalize_size_arg("not-a-size", "chunks", allow_auto=True)
+        with pytest.raises(ValueError):
+            _normalize_size_arg({"time": 0}, "chunks", allow_auto=True)
+        with pytest.raises(TypeError):
+            _normalize_size_arg(True, "chunks", allow_auto=True)
+        with pytest.raises(ValueError):
+            _normalize_size_arg("auto", "shards", allow_auto=False)
+
+    def test_rechunk_dataset_shard_multiple_of_chunk(self):
+        ds = xr.Dataset({"v": (("t", "x"), np.zeros((240, 200), dtype="f4"))}).chunk(
+            {"t": 24, "x": 100}
+        )
+        out = _rechunk_dataset(
+            ds, _RechunkSpec(chunks={"t": 12, "x": 50}, shards=4 * 1024 * 1024)
+        )
+        chunks = out["v"].encoding["chunks"]
+        shards = out["v"].encoding["shards"]
+        assert chunks == (12, 50)
+        assert all(s % c == 0 for s, c in zip(shards, chunks))
+
+    def test_rechunk_dataset_shard_smaller_than_chunk_disables(self):
+        ds = xr.Dataset({"v": (("t", "x"), np.zeros((240, 200), dtype="f4"))}).chunk(
+            {"t": 240, "x": 200}
+        )
+        with pytest.warns(UserWarning, match="unsharded"):
+            out = _rechunk_dataset(ds, _RechunkSpec(chunks=None, shards=8))
+        assert "shards" not in out["v"].encoding
+
+    def test_representative_source_size(
+        self, local_om2_datastore_path, intake_esm_kwargs, tmpdir
+    ):
+        builder = self._builder(
+            local_om2_datastore_path, intake_esm_kwargs, tmpdir / "s.icechunk"
+        )
+        size = _representative_source_size(builder._source_file_paths(), n=5)
+        assert isinstance(size, int) and size > 0
+
+    def test_build_with_chunk_size(
+        self, local_om2_datastore_path, intake_esm_kwargs, tmpdir
+    ):
+        store_path = tmpdir / "chunksize.icechunk"
+        builder = self._builder(local_om2_datastore_path, intake_esm_kwargs, store_path)
+        builder.rechunk(chunks="4KiB").build()
+
+        arrays = self._multidim_data_arrays(store_path)
+        assert arrays  # the store has multi-dim data variables
+        for arr in arrays.values():
+            chunk_bytes = int(np.prod(arr.chunks)) * arr.dtype.itemsize
+            full_bytes = int(np.prod(arr.shape)) * arr.dtype.itemsize
+            assert arr.shards is None
+            # dask keeps each chunk at/under the target; only arrays bigger than
+            # the target are actually split.
+            if full_bytes > 4 * 1024:
+                assert chunk_bytes <= 4 * 1024
+                assert arr.chunks != arr.shape
+
+    def test_build_with_chunk_dict(
+        self, local_om2_datastore_path, intake_esm_kwargs, tmpdir
+    ):
+        store_path = tmpdir / "chunkdict.icechunk"
+        builder = self._builder(local_om2_datastore_path, intake_esm_kwargs, store_path)
+        builder.rechunk(chunks={"time": 1}).build()
+
+        seen_time = False
+        for arr in self._multidim_data_arrays(store_path).values():
+            dims = arr.metadata.dimension_names
+            if dims and "time" in dims:
+                seen_time = True
+                assert arr.chunks[dims.index("time")] == 1
+        assert seen_time  # at least one data var has a time dimension
+
+    def test_build_with_shards_auto(
+        self, local_om2_datastore_path, intake_esm_kwargs, tmpdir
+    ):
+        store_path = tmpdir / "shardsauto.icechunk"
+        builder = self._builder(local_om2_datastore_path, intake_esm_kwargs, store_path)
+        builder.rechunk(chunks="2KiB", shards="auto").build()
+
+        sharded = [
+            a for a in self._multidim_data_arrays(store_path).values() if a.shards
+        ]
+        assert sharded  # at least one variable ended up sharded
+        for arr in sharded:
+            assert all(s % c == 0 for s, c in zip(arr.shards, arr.chunks))
 
 
 class TestIcechunkCephStoreBuilder(BuilderTests):
