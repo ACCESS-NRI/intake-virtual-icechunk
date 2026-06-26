@@ -107,6 +107,16 @@ async def _extract_group_metadata(
 
     ``dimensions`` is the union of every array's ``dimension_names``. Ordering is
     first-seen across the group's members so the result is deterministic.
+
+    Returns
+    -------
+    tuple of (variable, coordinates, dimensions)
+        Awaiting this coroutine yields a 3-tuple of:
+
+        * ``variable`` : tuple of str, or None — the data-variable names (``None``
+          when the group has no data variables, e.g. a grid file).
+        * ``coordinates`` : tuple of str — the coordinate-variable names.
+        * ``dimensions`` : tuple of str — the dimension names.
     """
     dimensions: dict[str, None] = {}  # ordered set
     coord_attr_names: set[str] = set()
@@ -142,10 +152,19 @@ async def _extract_group_metadata(
 async def _extract_all_group_metadata(
     store, keys: list[str]
 ) -> dict[str, tuple[tuple[str, ...] | None, tuple[str, ...], tuple[str, ...]]]:
-    """Concurrently read ``(variable, coordinates, dimensions)`` for every key."""
+    """Concurrently read ``(variable, coordinates, dimensions)`` for every key.
+
+    Returns
+    -------
+    dict of {str: (variable, coordinates, dimensions)}
+        Awaiting this coroutine yields a mapping from group key to that group's
+        metadata 3-tuple, as produced by :func:`_extract_group_metadata`.
+    """
     async_root = await zarr.api.asynchronous.open_group(store=store, mode="r")
 
-    async def _one(key: str):
+    async def _one(
+        key: str,
+    ) -> tuple[str, tuple[tuple[str, ...] | None, tuple[str, ...], tuple[str, ...]]]:
         group = await async_root.getitem(key)
         return key, await _extract_group_metadata(group)
 
