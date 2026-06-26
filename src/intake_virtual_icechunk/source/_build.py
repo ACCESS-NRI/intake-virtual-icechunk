@@ -149,6 +149,15 @@ class AbstractIcechunkStoreBuilder(abc.ABC):
         """
         if isinstance(self._xarray_kwargs, dict):
             return [self._xarray_kwargs for _ in self.esm_ds]
+        n_groups = len(self.esm_ds)
+        if len(self._xarray_kwargs) != n_groups:
+            raise ValueError(
+                f"xarray_kwargs was given as a list of {len(self._xarray_kwargs)} "
+                f"dict(s), but the datastore has {n_groups} dataset group(s). When "
+                "passing a list, it must have exactly one dict per group (otherwise "
+                "groups would be silently dropped); pass a single dict to apply the "
+                "same kwargs to every group."
+            )
         return self._xarray_kwargs
 
     def _extract_datastore_structure(self) -> DataStoreStructure:
