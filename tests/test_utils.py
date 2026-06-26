@@ -5,6 +5,7 @@ from intake_virtual_icechunk.utils import (
     _filter_config_args,
     _intake_cat_filename,
     _path_to_url,
+    _representative_source_size,
     _resolve_store,
     _resolve_vcc_store,
     _sidecar_url,
@@ -203,3 +204,25 @@ class TestResolveStore:
     def test_azure_raises_not_implemented(self):
         with pytest.raises(NotImplementedError, match="Azure"):
             _resolve_store("az://my-container/", {})
+
+
+class TestRepresentativeSourceSize:
+    def test_returns_median_size(self, tmp_path):
+        # Three local files of known size; median bytes is returned.
+        paths = []
+        for i, size in enumerate((10, 100, 1000)):
+            p = tmp_path / f"f{i}.bin"
+            p.write_bytes(b"\0" * size)
+            paths.append(str(p))
+        assert _representative_source_size(paths) == 100
+
+    def test_empty_paths_raises(self):
+        with pytest.raises(ObjectStoreError, match="No source file paths"):
+            _representative_source_size([])
+
+    def test_all_heads_fail_raises(self, tmp_path):
+        # A path that does not exist: every HEAD fails and is skipped, leaving
+        # no sizes to summarise.
+        missing = str(tmp_path / "does_not_exist.nc")
+        with pytest.raises(ObjectStoreError, match="Could not HEAD"):
+            _representative_source_size([missing])

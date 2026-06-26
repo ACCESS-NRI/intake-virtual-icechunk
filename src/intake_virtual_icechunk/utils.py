@@ -3,16 +3,20 @@ Copyright 2026 ACCESS-NRI and contributors. See the top-level COPYRIGHT file for
 SPDX-License-Identifier: Apache-2.0
 """
 
+import asyncio
 import copy
 import os
 import posixpath
+import statistics
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
 import icechunk
+import obstore
 from obspec_utils.registry import ObjectStoreRegistry
 from obstore.store import AzureStore, GCSStore, LocalStore, S3Store
+from obstore.store import from_url as _obs_from_url
 
 __stores__ = ["LocalStore", "S3Store", "GCSStore", "AzureStore"]
 
@@ -318,6 +322,49 @@ def _path_to_url(path: str | Path) -> str:
     # Bare local path (no scheme, or single-char Windows drive letter).
     abs_path = os.path.abspath(path_str)
     return f"file://{abs_path}"
+
+
+async def _head_source_sizes(paths: list[str], config: dict | None) -> list[int]:
+    """HEAD each path concurrently and return the sizes that succeeded.
+
+    Failures (missing file, permission error, ...) are skipped rather than
+    raising, so a single bad path does not sink the whole sample.
+    """
+
+    async def _one(path: str) -> int:
+        url = _path_to_url(path)
+        dir_url, _, name = url.rpartition("/")
+        store = (
+            _obs_from_url(dir_url, config=config) if config else _obs_from_url(dir_url)
+        )
+        meta = await obstore.head_async(store, name)
+        return int(meta["size"])
+
+    results = await asyncio.gather(*(_one(p) for p in paths), return_exceptions=True)
+    return [r for r in results if isinstance(r, int)]
+
+
+def _representative_source_size(
+    paths: list[str], n: int = 10, config: dict | None = None
+) -> int:
+    """Median on-disk size (bytes) of the first *n* source files.
+
+    Used to pick a shard byte-target for ``shards="auto"`` so that one shard
+    object holds roughly the data of one input file. The median is robust to a
+    single oddly-sized file; HEAD failures are skipped (see
+    :func:`_head_source_sizes`). Uses default/environment obstore config.
+    """
+    sample = list(paths)[:n]
+    if not sample:
+        raise ObjectStoreError("No source file paths available to size shards.")
+
+    sizes = asyncio.run(_head_source_sizes(sample, config))
+    if not sizes:
+        raise ObjectStoreError(
+            f"Could not HEAD any of the {len(sample)} sampled source files "
+            "to determine an automatic shard size."
+        )
+    return int(statistics.median(sizes))
 
 
 def _filter_config_args(store_options: dict) -> dict:

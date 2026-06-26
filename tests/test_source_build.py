@@ -12,8 +12,11 @@ import pandas as pd
 import pytest
 import tlz
 import virtualizarr
+import xarray as xr
+import zarr
 from access_nri_intake.source.builders import AccessOm2Builder
 from dotenv import load_dotenv
+from icechunk.xarray import to_icechunk
 from intake_esm.core import esm_datastore
 from obstore.store import ObjectStore, from_url
 from pandas.testing import assert_frame_equal
@@ -23,8 +26,18 @@ from intake_virtual_icechunk.source import (
     IcechunkStoreBuilder,
     VirtualIcechunkStoreBuilder,
 )
+from intake_virtual_icechunk.source._build import (
+    _inner_chunk_shape,
+    _normalize_size_arg,
+    _rechunk_dataset,
+    _RechunkSpec,
+    _resolve_shard_shape,
+)
 from intake_virtual_icechunk.source.utils import GroupEntry, GroupEntryError
-from intake_virtual_icechunk.utils import _intake_cat_filename
+from intake_virtual_icechunk.utils import (
+    _intake_cat_filename,
+    _representative_source_size,
+)
 
 __all__ = ["VirtualIcechunkStoreBuilder", "pytest"]
 
@@ -1048,6 +1061,200 @@ class TestZarrIcechunkStoreBuilder:
 
         assert len(builder.failed_list) == len(builder.esm_ds.keys())
         assert set(fl[0] for fl in builder.failed_list) == set(builder.esm_ds.keys())
+
+    def _builder(self, datastore_path, esm_kwargs, store_path):
+        return IcechunkStoreBuilder(
+            esm_datastore_path=datastore_path,
+            icechunk_store_path=store_path,
+            esm_datastore_kwargs=esm_kwargs,
+        )
+
+    @staticmethod
+    def _multidim_data_arrays(store_path) -> dict:
+        """Return {path: zarr.Array} for every >=2-D array in the built store."""
+        repo = icechunk.Repository.open(
+            icechunk.local_filesystem_storage(str(store_path))
+        )
+        root = zarr.open_group(repo.readonly_session("main").store, mode="r")
+        arrays = {}
+        for gname, group in root.groups():
+            for aname, arr in group.arrays():
+                if arr.ndim >= 2:
+                    arrays[f"{gname}/{aname}"] = arr
+        return arrays
+
+    def test_rechunk_returns_self(
+        self, local_om2_datastore_path, intake_esm_kwargs, tmpdir
+    ):
+        builder = self._builder(
+            local_om2_datastore_path, intake_esm_kwargs, tmpdir / "s.icechunk"
+        )
+        assert builder._rechunk is None
+        assert builder.rechunk(chunks="1MiB") is builder
+        assert builder._rechunk is not None
+
+    def test_normalize_size_arg(self):
+        assert _normalize_size_arg(None, "chunks", allow_auto=True) is None
+        assert _normalize_size_arg("auto", "chunks", allow_auto=True) == "auto"
+        assert _normalize_size_arg("128", "chunks", allow_auto=True) == 128
+        assert _normalize_size_arg("128MiB", "chunks", allow_auto=True) == 128 * 1024**2
+        assert _normalize_size_arg({"time": 3}, "chunks", allow_auto=True) == {
+            "time": 3
+        }
+
+    def test_normalize_size_arg_invalid(self):
+        with pytest.raises(ValueError):
+            _normalize_size_arg("not-a-size", "chunks", allow_auto=True)
+        with pytest.raises(ValueError):
+            _normalize_size_arg({"time": 0}, "chunks", allow_auto=True)
+        with pytest.raises(ValueError):
+            _normalize_size_arg(-5, "chunks", allow_auto=True)
+        with pytest.raises(TypeError):
+            _normalize_size_arg([1, 2], "chunks", allow_auto=True)
+        with pytest.raises(ValueError):
+            _normalize_size_arg("auto", "shards", allow_auto=False)
+
+    def test_inner_chunk_shape(self):
+        # numpy-backed (not dask) -> whole dimension is one chunk
+        numpy_var = xr.DataArray(np.zeros((3, 4)), dims=("a", "b"))
+        assert _inner_chunk_shape(numpy_var) == {"a": 3, "b": 4}
+        # dask-backed -> first block length per dimension
+        dask_var = numpy_var.chunk({"a": 2, "b": 4})
+        assert _inner_chunk_shape(dask_var) == {"a": 2, "b": 4}
+
+    def test_resolve_shard_shape_dict(self):
+        var = xr.DataArray(np.zeros((240, 200), dtype="f4"), dims=("t", "x"))
+        chunk_by_dim = {"t": 12, "x": 50}
+        # unlisted dims default to one chunk; listed dims kept (multiples of chunk)
+        shard = _resolve_shard_shape("v", var, chunk_by_dim, {"t": 24})
+        assert shard == {"t": 24, "x": 50}
+
+    def test_resolve_shard_shape_dict_smaller_than_chunk_disables(self):
+        var = xr.DataArray(np.zeros((240, 200), dtype="f4"), dims=("t", "x"))
+        chunk_by_dim = {"t": 12, "x": 50}
+        with pytest.warns(UserWarning, match="unsharded"):
+            assert _resolve_shard_shape("v", var, chunk_by_dim, {"t": 6}) is None
+
+    def test_rechunk_dataset_sharded_roundtrip(self, tmpdir):
+        """Inner chunk strictly smaller than shard must survive a to_icechunk write.
+
+        Regression guard: this only succeeds if the dask graph is realigned to the
+        shard shape (otherwise to_icechunk raises "would overlap multiple Dask
+        chunks") and encoding['chunks'] pins the inner chunk.
+        """
+        ds = xr.Dataset({"v": (("t", "x"), np.zeros((240, 200), dtype="f4"))}).chunk(
+            {"t": 24, "x": 100}
+        )
+        out = _rechunk_dataset(
+            ds, _RechunkSpec(chunks={"t": 12, "x": 50}, shards={"t": 24, "x": 100})
+        )
+
+        repo = icechunk.Repository.create(
+            icechunk.local_filesystem_storage(str(tmpdir / "sharded.icechunk"))
+        )
+        with repo.transaction("main", message="shard test") as store:
+            to_icechunk(out, store.session, group="g", mode="a")
+
+        arr = zarr.open_group(repo.readonly_session("main").store, mode="r")["g"]["v"]
+        assert arr.chunks == (12, 50)
+        assert arr.shards == (24, 100)
+        assert arr.chunks != arr.shards  # genuinely sub-shard chunked
+
+    def test_rechunk_dataset_chunks_auto(self):
+        # "auto" hands the shape to dask; a numpy-backed dataset becomes chunked.
+        ds = xr.Dataset({"v": (("t", "x"), np.zeros((100, 100), dtype="f4"))})
+        assert ds["v"].chunks is None
+        out = _rechunk_dataset(ds, _RechunkSpec(chunks="auto", shards=None))
+        assert out["v"].chunks is not None
+
+    def test_rechunk_dataset_skips_scalar_data_var(self):
+        # A dimensionless data variable can't be sharded and must be skipped.
+        ds = xr.Dataset(
+            {
+                "s": ((), np.float32(1.0)),
+                "v": (("t", "x"), np.zeros((48, 48), dtype="f4")),
+            }
+        ).chunk({"t": 12, "x": 12})
+        out = _rechunk_dataset(ds, _RechunkSpec(chunks=None, shards={"t": 24, "x": 24}))
+        assert "shards" not in out["s"].encoding
+        assert out["v"].encoding["shards"] == (24, 24)
+
+    def test_rechunk_dataset_shard_multiple_of_chunk(self):
+        ds = xr.Dataset({"v": (("t", "x"), np.zeros((240, 200), dtype="f4"))}).chunk(
+            {"t": 24, "x": 100}
+        )
+        out = _rechunk_dataset(
+            ds, _RechunkSpec(chunks={"t": 12, "x": 50}, shards=4 * 1024 * 1024)
+        )
+        chunks = out["v"].encoding["chunks"]
+        shards = out["v"].encoding["shards"]
+        assert chunks == (12, 50)
+        assert all(s % c == 0 for s, c in zip(shards, chunks))
+
+    def test_rechunk_dataset_shard_smaller_than_chunk_disables(self):
+        ds = xr.Dataset({"v": (("t", "x"), np.zeros((240, 200), dtype="f4"))}).chunk(
+            {"t": 240, "x": 200}
+        )
+        with pytest.warns(UserWarning, match="unsharded"):
+            out = _rechunk_dataset(ds, _RechunkSpec(chunks=None, shards=8))
+        assert "shards" not in out["v"].encoding
+
+    def test_representative_source_size(
+        self, local_om2_datastore_path, intake_esm_kwargs, tmpdir
+    ):
+        builder = self._builder(
+            local_om2_datastore_path, intake_esm_kwargs, tmpdir / "s.icechunk"
+        )
+        size = _representative_source_size(builder._source_file_paths(), n=5)
+        assert isinstance(size, int) and size > 0
+
+    def test_build_with_chunk_size(
+        self, local_om2_datastore_path, intake_esm_kwargs, tmpdir
+    ):
+        store_path = tmpdir / "chunksize.icechunk"
+        builder = self._builder(local_om2_datastore_path, intake_esm_kwargs, store_path)
+        builder.rechunk(chunks="4KiB").build()
+
+        arrays = self._multidim_data_arrays(store_path)
+        assert arrays  # the store has multi-dim data variables
+        for arr in arrays.values():
+            chunk_bytes = int(np.prod(arr.chunks)) * arr.dtype.itemsize
+            full_bytes = int(np.prod(arr.shape)) * arr.dtype.itemsize
+            assert arr.shards is None
+            # dask keeps each chunk at/under the target; only arrays bigger than
+            # the target are actually split.
+            if full_bytes > 4 * 1024:
+                assert chunk_bytes <= 4 * 1024
+                assert arr.chunks != arr.shape
+
+    def test_build_with_chunk_dict(
+        self, local_om2_datastore_path, intake_esm_kwargs, tmpdir
+    ):
+        store_path = tmpdir / "chunkdict.icechunk"
+        builder = self._builder(local_om2_datastore_path, intake_esm_kwargs, store_path)
+        builder.rechunk(chunks={"time": 1}).build()
+
+        seen_time = False
+        for arr in self._multidim_data_arrays(store_path).values():
+            dims = arr.metadata.dimension_names
+            if dims and "time" in dims:
+                seen_time = True
+                assert arr.chunks[dims.index("time")] == 1
+        assert seen_time  # at least one data var has a time dimension
+
+    def test_build_with_shards_auto(
+        self, local_om2_datastore_path, intake_esm_kwargs, tmpdir
+    ):
+        store_path = tmpdir / "shardsauto.icechunk"
+        builder = self._builder(local_om2_datastore_path, intake_esm_kwargs, store_path)
+        builder.rechunk(chunks="2KiB", shards="auto").build()
+
+        sharded = [
+            a for a in self._multidim_data_arrays(store_path).values() if a.shards
+        ]
+        assert sharded  # at least one variable ended up sharded
+        for arr in sharded:
+            assert all(s % c == 0 for s, c in zip(arr.shards, arr.chunks))
 
 
 class TestIcechunkCephStoreBuilder(BuilderTests):
