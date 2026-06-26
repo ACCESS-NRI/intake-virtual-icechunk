@@ -5,7 +5,6 @@ import warnings
 from collections.abc import Generator, Iterable, Mapping
 from dataclasses import dataclass
 from functools import cached_property
-
 # Copyright 2026 ACCESS-NRI and contributors. See the top-level COPYRIGHT file for details.
 # SPDX-License-Identifier: Apache-2.0
 from pathlib import Path
@@ -26,34 +25,24 @@ from intake_esm.utils import MinimalExploder
 from obstore.store import from_url as _obs_from_url
 from virtualizarr import open_virtual_dataset, open_virtual_mfdataset
 
-from intake_virtual_icechunk.source._containers import VirtualChunkContainerModel
-from intake_virtual_icechunk.source.utils import (
-    DataStoreStructure,
-    GroupEntry,
-    ParserInferenceError,
-)
-from intake_virtual_icechunk.utils import (
-    _filter_config_args,
-    _intake_cat_filename,
-    _path_to_url,
-    _representative_source_size,
-    _resolve_storage,
-    _resolve_store,
-    _resolve_vcc_store,
-)
+from intake_virtual_icechunk.source._containers import \
+    VirtualChunkContainerModel
+from intake_virtual_icechunk.source.utils import (DataStoreStructure,
+                                                  GroupEntry,
+                                                  ParserInferenceError)
+from intake_virtual_icechunk.utils import (_filter_config_args,
+                                           _intake_cat_filename, _path_to_url,
+                                           _representative_source_size,
+                                           _resolve_storage, _resolve_store,
+                                           _resolve_vcc_store)
 
 if TYPE_CHECKING:
     from obspec_utils.registry import ObjectStoreRegistry
     from obstore.store import ObjectStore
-    from virtualizarr.parsers import (
-        DMRPPParser,
-        FITSParser,
-        HDFParser,
-        KerchunkJSONParser,
-        KerchunkParquetParser,
-        NetCDF3Parser,
-        ZarrParser,
-    )
+    from virtualizarr.parsers import (DMRPPParser, FITSParser, HDFParser,
+                                      KerchunkJSONParser,
+                                      KerchunkParquetParser, NetCDF3Parser,
+                                      ZarrParser)
 
     VirtualizarrParser = (
         type[DMRPPParser]
@@ -883,7 +872,7 @@ class _RechunkSpec:
 def _validate_shape_dict(value: dict, name: str) -> dict[str, int]:
     out: dict[str, int] = {}
     for dim, length in value.items():
-        if isinstance(length, bool) or not isinstance(length, int) or length <= 0:
+        if not isinstance(length, int) or length <= 0:
             raise ValueError(
                 f"{name} mapping values must be positive integers; "
                 f"got {dim!r}: {length!r}."
@@ -900,8 +889,6 @@ def _normalize_size_arg(
         return None
     if isinstance(value, dict):
         return _validate_shape_dict(value, name)
-    if isinstance(value, bool):
-        raise TypeError(f"{name} must not be a bool; got {value!r}.")
     if isinstance(value, int):
         if value <= 0:
             raise ValueError(f"{name} byte size must be positive; got {value!r}.")
@@ -919,13 +906,21 @@ def _normalize_size_arg(
 
 
 def _inner_chunk_shape(var: xr.DataArray) -> dict[str, int]:
-    """Per-dimension on-disk chunk length for *var* (first dask block, or full)."""
+    """Per-dimension on-disk chunk length for *var* (first dask block, or full).
+
+    ``var.chunksizes[dim]`` is a tuple of the dask block lengths along *dim*
+    (e.g. ``(12, 12, 6)`` for a size-30 dim chunked at 12). We take ``[0]`` —
+    the first block — as the representative uniform chunk length, which is what
+    zarr writes for every chunk but the (possibly short) last one. If *var* is
+    not dask-backed (``var.chunks is None``) the whole dimension is one chunk.
+    """
     if var.chunks is None:
         return {dim: int(var.sizes[dim]) for dim in var.dims}
     return {dim: int(var.chunksizes[dim][0]) for dim in var.dims}
 
 
 def _ceil_to_multiple(value: int, multiple: int) -> int:
+    """Round *value* up to the nearest integer multiple of *multiple*."""
     return ((value + multiple - 1) // multiple) * multiple
 
 
@@ -960,6 +955,9 @@ def _resolve_shard_shape(
         ideal = normalize_chunks(
             "auto", shape=var.shape, dtype=var.dtype, limit=int(shards)
         )
+        # ``ideal`` is dask's block shape hitting the byte target, but a shard must
+        # tile the chunk grid, so snap each dimension to the nearest whole number
+        # of chunks (at least one). e.g. ideal=50, chunk=12 -> round(50/12)=4 -> 48.
         desired = {
             dim: max(1, round(ideal[i][0] / chunk_by_dim[dim])) * chunk_by_dim[dim]
             for i, dim in enumerate(var.dims)
@@ -1004,8 +1002,7 @@ def _rechunk_dataset(ds: xr.Dataset, spec: _RechunkSpec) -> xr.Dataset:
             if shard_by_dim is None:
                 continue
             # Align dask blocks to whole shards so each task writes one shard, and
-            # pin both the inner chunk and the shard in the zarr encoding.
-            ds[name] = var.chunk(shard_by_dim)
+            # pin both the inner chunk and the shard in the zarr encoding.            ds[name] = var.chunk(shard_by_dim)
             ds[name].encoding["chunks"] = tuple(chunk_by_dim[d] for d in var.dims)
             ds[name].encoding["shards"] = tuple(shard_by_dim[d] for d in var.dims)
 

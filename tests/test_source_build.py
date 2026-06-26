@@ -1059,10 +1059,6 @@ class TestZarrIcechunkStoreBuilder:
         assert len(builder.failed_list) == len(builder.esm_ds.keys())
         assert set(fl[0] for fl in builder.failed_list) == set(builder.esm_ds.keys())
 
-    # ------------------------------------------------------------------
-    # rechunk() / sharding
-    # ------------------------------------------------------------------
-
     def _builder(self, datastore_path, esm_kwargs, store_path):
         return IcechunkStoreBuilder(
             esm_datastore_path=datastore_path,
@@ -1090,6 +1086,7 @@ class TestZarrIcechunkStoreBuilder:
         builder = self._builder(
             local_om2_datastore_path, intake_esm_kwargs, tmpdir / "s.icechunk"
         )
+        assert builder._rechunk is None
         assert builder.rechunk(chunks="1MiB") is builder
         assert builder._rechunk is not None
 
@@ -1108,7 +1105,7 @@ class TestZarrIcechunkStoreBuilder:
         with pytest.raises(ValueError):
             _normalize_size_arg({"time": 0}, "chunks", allow_auto=True)
         with pytest.raises(TypeError):
-            _normalize_size_arg(True, "chunks", allow_auto=True)
+            _normalize_size_arg([1, 2], "chunks", allow_auto=True)
         with pytest.raises(ValueError):
             _normalize_size_arg("auto", "shards", allow_auto=False)
 
