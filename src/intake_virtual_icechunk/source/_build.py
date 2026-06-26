@@ -296,9 +296,11 @@ class AbstractIcechunkStoreBuilder(abc.ABC):
             .to_dict(as_series=False)
         )
 
-        # No None type until we deiter columns
+        # Drop nulls and empty-string "absent" markers (no None type until we
+        # deiter columns) while keeping legitimate falsy values such as 0, 0.0
+        # and False.
         exploded_metadata = {
-            k: [val for val in set(v) if val]  # type: ignore[arg-type]
+            k: [val for val in set(v) if val is not None and val != ""]  # type: ignore[arg-type]
             for k, v in exploded_metadata.items()
         }
 

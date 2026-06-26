@@ -344,6 +344,41 @@ class TestVirtualIcechunkStoreBuilder(BuilderTests):
             "experiment_id": "hist",
         }
 
+    def test_attach_catalog_metadata_keeps_falsy_values(self, tmpdir):
+        """Legitimate falsy metadata (0, 0.0, False) must survive deduplication.
+
+        Regression test: the dedup step previously filtered with ``if val``,
+        which silently dropped 0/0.0/False alongside nulls. Empty strings remain
+        treated as an 'absent' marker (collapse to None when deiterated).
+        """
+        dummy_store_path = tmpdir / "dummy_store.icechunk"
+        builder = IcechunkStoreBuilder(
+            esm_datastore_path="dummy.json",
+            icechunk_store_path=dummy_store_path,
+            drop_cols=["path"],
+            cols_to_deiter=["level", "flag", "ratio", "missing"],
+        )
+        group_df = pd.DataFrame(
+            {
+                "level": [0, 0],
+                "flag": [False, False],
+                "ratio": [0.0, 0.0],
+                "missing": ["", ""],
+                "path": ["a", "b"],
+            }
+        )
+
+        zarr_group = MagicMock()
+        zarr_group.attrs = {}
+
+        builder._attach_catalog_metadata(zarr_group, group_df, group_attrs={})
+
+        assert zarr_group.attrs["level"] == 0
+        assert zarr_group.attrs["flag"] is False
+        assert zarr_group.attrs["ratio"] == 0.0
+        # Empty strings stay an 'absent' marker, collapsing to None.
+        assert zarr_group.attrs["missing"] is None
+
     def test_iter_esm_groups(self, local_om2_datastore_path, intake_esm_kwargs, tmpdir):
         """The shared ESM iterator should yield one structured entry per catalog key."""
         dummy_store_path = tmpdir / "dummy_store.icechunk"
