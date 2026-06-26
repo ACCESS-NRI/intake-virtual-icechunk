@@ -5,6 +5,7 @@ import warnings
 from collections.abc import Generator, Iterable, Mapping
 from dataclasses import dataclass
 from functools import cached_property
+
 # Copyright 2026 ACCESS-NRI and contributors. See the top-level COPYRIGHT file for details.
 # SPDX-License-Identifier: Apache-2.0
 from pathlib import Path
@@ -25,24 +26,34 @@ from intake_esm.utils import MinimalExploder
 from obstore.store import from_url as _obs_from_url
 from virtualizarr import open_virtual_dataset, open_virtual_mfdataset
 
-from intake_virtual_icechunk.source._containers import \
-    VirtualChunkContainerModel
-from intake_virtual_icechunk.source.utils import (DataStoreStructure,
-                                                  GroupEntry,
-                                                  ParserInferenceError)
-from intake_virtual_icechunk.utils import (_filter_config_args,
-                                           _intake_cat_filename, _path_to_url,
-                                           _representative_source_size,
-                                           _resolve_storage, _resolve_store,
-                                           _resolve_vcc_store)
+from intake_virtual_icechunk.source._containers import VirtualChunkContainerModel
+from intake_virtual_icechunk.source.utils import (
+    DataStoreStructure,
+    GroupEntry,
+    ParserInferenceError,
+)
+from intake_virtual_icechunk.utils import (
+    _filter_config_args,
+    _intake_cat_filename,
+    _path_to_url,
+    _representative_source_size,
+    _resolve_storage,
+    _resolve_store,
+    _resolve_vcc_store,
+)
 
 if TYPE_CHECKING:
     from obspec_utils.registry import ObjectStoreRegistry
     from obstore.store import ObjectStore
-    from virtualizarr.parsers import (DMRPPParser, FITSParser, HDFParser,
-                                      KerchunkJSONParser,
-                                      KerchunkParquetParser, NetCDF3Parser,
-                                      ZarrParser)
+    from virtualizarr.parsers import (
+        DMRPPParser,
+        FITSParser,
+        HDFParser,
+        KerchunkJSONParser,
+        KerchunkParquetParser,
+        NetCDF3Parser,
+        ZarrParser,
+    )
 
     VirtualizarrParser = (
         type[DMRPPParser]
@@ -747,7 +758,7 @@ class IcechunkStoreBuilder(AbstractIcechunkStoreBuilder):
         if isinstance(shards, str) and shards == "auto":
             shards = _representative_source_size(self._source_file_paths())
         norm_shards = _normalize_size_arg(shards, "shards", allow_auto=False)
-        self._rechunk = _RechunkSpec(chunks=norm_chunks, shards=norm_shards)
+        self._rechunk = _RechunkSpec(chunks=norm_chunks, shards=norm_shards)  # type: ignore[arg-type]
         return self
 
     def _apply_rechunking(self, ds: xr.Dataset) -> xr.Dataset:
