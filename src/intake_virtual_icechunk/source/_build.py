@@ -1013,7 +1013,13 @@ def _rechunk_dataset(ds: xr.Dataset, spec: _RechunkSpec) -> xr.Dataset:
             if shard_by_dim is None:
                 continue
             # Align dask blocks to whole shards so each task writes one shard, and
-            # pin both the inner chunk and the shard in the zarr encoding.            ds[name] = var.chunk(shard_by_dim)
+            # pin both the inner chunk and the shard in the zarr encoding. Both are
+            # required (verified on icechunk 2.x): xarray treats the shard as the
+            # write unit, so its safe-chunks check demands each dask block equal one
+            # whole shard, and encoding["chunks"] pins the inner read chunk within
+            # it. Omitting either raises "encoding['chunks'] ... would overlap
+            # multiple Dask chunks".
+            ds[name] = var.chunk(shard_by_dim)
             ds[name].encoding["chunks"] = tuple(chunk_by_dim[d] for d in var.dims)
             ds[name].encoding["shards"] = tuple(shard_by_dim[d] for d in var.dims)
 

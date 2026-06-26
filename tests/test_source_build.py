@@ -16,6 +16,7 @@ import xarray as xr
 import zarr
 from access_nri_intake.source.builders import AccessOm2Builder
 from dotenv import load_dotenv
+from icechunk.xarray import to_icechunk
 from intake_esm.core import esm_datastore
 from obstore.store import ObjectStore, from_url
 from pandas.testing import assert_frame_equal
@@ -26,9 +27,11 @@ from intake_virtual_icechunk.source import (
     VirtualIcechunkStoreBuilder,
 )
 from intake_virtual_icechunk.source._build import (
+    _inner_chunk_shape,
     _normalize_size_arg,
     _rechunk_dataset,
     _RechunkSpec,
+    _resolve_shard_shape,
 )
 from intake_virtual_icechunk.source.utils import GroupEntry, GroupEntryError
 from intake_virtual_icechunk.utils import (
@@ -1104,10 +1107,77 @@ class TestZarrIcechunkStoreBuilder:
             _normalize_size_arg("not-a-size", "chunks", allow_auto=True)
         with pytest.raises(ValueError):
             _normalize_size_arg({"time": 0}, "chunks", allow_auto=True)
+        with pytest.raises(ValueError):
+            _normalize_size_arg(-5, "chunks", allow_auto=True)
         with pytest.raises(TypeError):
             _normalize_size_arg([1, 2], "chunks", allow_auto=True)
         with pytest.raises(ValueError):
             _normalize_size_arg("auto", "shards", allow_auto=False)
+
+    def test_inner_chunk_shape(self):
+        # numpy-backed (not dask) -> whole dimension is one chunk
+        numpy_var = xr.DataArray(np.zeros((3, 4)), dims=("a", "b"))
+        assert _inner_chunk_shape(numpy_var) == {"a": 3, "b": 4}
+        # dask-backed -> first block length per dimension
+        dask_var = numpy_var.chunk({"a": 2, "b": 4})
+        assert _inner_chunk_shape(dask_var) == {"a": 2, "b": 4}
+
+    def test_resolve_shard_shape_dict(self):
+        var = xr.DataArray(np.zeros((240, 200), dtype="f4"), dims=("t", "x"))
+        chunk_by_dim = {"t": 12, "x": 50}
+        # unlisted dims default to one chunk; listed dims kept (multiples of chunk)
+        shard = _resolve_shard_shape("v", var, chunk_by_dim, {"t": 24})
+        assert shard == {"t": 24, "x": 50}
+
+    def test_resolve_shard_shape_dict_smaller_than_chunk_disables(self):
+        var = xr.DataArray(np.zeros((240, 200), dtype="f4"), dims=("t", "x"))
+        chunk_by_dim = {"t": 12, "x": 50}
+        with pytest.warns(UserWarning, match="unsharded"):
+            assert _resolve_shard_shape("v", var, chunk_by_dim, {"t": 6}) is None
+
+    def test_rechunk_dataset_sharded_roundtrip(self, tmpdir):
+        """Inner chunk strictly smaller than shard must survive a to_icechunk write.
+
+        Regression guard: this only succeeds if the dask graph is realigned to the
+        shard shape (otherwise to_icechunk raises "would overlap multiple Dask
+        chunks") and encoding['chunks'] pins the inner chunk.
+        """
+        ds = xr.Dataset({"v": (("t", "x"), np.zeros((240, 200), dtype="f4"))}).chunk(
+            {"t": 24, "x": 100}
+        )
+        out = _rechunk_dataset(
+            ds, _RechunkSpec(chunks={"t": 12, "x": 50}, shards={"t": 24, "x": 100})
+        )
+
+        repo = icechunk.Repository.create(
+            icechunk.local_filesystem_storage(str(tmpdir / "sharded.icechunk"))
+        )
+        with repo.transaction("main", message="shard test") as store:
+            to_icechunk(out, store.session, group="g", mode="a")
+
+        arr = zarr.open_group(repo.readonly_session("main").store, mode="r")["g"]["v"]
+        assert arr.chunks == (12, 50)
+        assert arr.shards == (24, 100)
+        assert arr.chunks != arr.shards  # genuinely sub-shard chunked
+
+    def test_rechunk_dataset_chunks_auto(self):
+        # "auto" hands the shape to dask; a numpy-backed dataset becomes chunked.
+        ds = xr.Dataset({"v": (("t", "x"), np.zeros((100, 100), dtype="f4"))})
+        assert ds["v"].chunks is None
+        out = _rechunk_dataset(ds, _RechunkSpec(chunks="auto", shards=None))
+        assert out["v"].chunks is not None
+
+    def test_rechunk_dataset_skips_scalar_data_var(self):
+        # A dimensionless data variable can't be sharded and must be skipped.
+        ds = xr.Dataset(
+            {
+                "s": ((), np.float32(1.0)),
+                "v": (("t", "x"), np.zeros((48, 48), dtype="f4")),
+            }
+        ).chunk({"t": 12, "x": 12})
+        out = _rechunk_dataset(ds, _RechunkSpec(chunks=None, shards={"t": 24, "x": 24}))
+        assert "shards" not in out["s"].encoding
+        assert out["v"].encoding["shards"] == (24, 24)
 
     def test_rechunk_dataset_shard_multiple_of_chunk(self):
         ds = xr.Dataset({"v": (("t", "x"), np.zeros((240, 200), dtype="f4"))}).chunk(
