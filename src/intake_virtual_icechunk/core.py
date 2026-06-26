@@ -73,21 +73,6 @@ def _read_sidecar_metadata(
     )
 
 
-def _match_query(attrs: dict, query: dict) -> bool:
-    """Return True if every key-value pair in *query* matches *attrs*.
-
-    A query value may be a scalar or a list; a scalar is treated as a
-    single-element list so that both ``search(x='a')`` and
-    ``search(x=['a', 'b'])`` work uniformly.
-    """
-    for key, value in query.items():
-        attr_val = attrs.get(key)
-        allowed = value if isinstance(value, list) else [value]
-        if attr_val not in allowed:
-            return False
-    return True
-
-
 async def _extract_group_metadata(
     group: AsyncGroup,
 ) -> tuple[tuple[str, ...] | None, tuple[str, ...], tuple[str, ...]]:

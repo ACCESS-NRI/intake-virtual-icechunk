@@ -344,6 +344,41 @@ class TestVirtualIcechunkStoreBuilder(BuilderTests):
             "experiment_id": "hist",
         }
 
+    def test_attach_catalog_metadata_keeps_falsy_values(self, tmpdir):
+        """Legitimate falsy metadata (0, 0.0, False) must survive deduplication.
+
+        Regression test: the dedup step previously filtered with ``if val``,
+        which silently dropped 0/0.0/False alongside nulls. Empty strings remain
+        treated as an 'absent' marker (collapse to None when deiterated).
+        """
+        dummy_store_path = tmpdir / "dummy_store.icechunk"
+        builder = IcechunkStoreBuilder(
+            esm_datastore_path="dummy.json",
+            icechunk_store_path=dummy_store_path,
+            drop_cols=["path"],
+            cols_to_deiter=["level", "flag", "ratio", "missing"],
+        )
+        group_df = pd.DataFrame(
+            {
+                "level": [0, 0],
+                "flag": [False, False],
+                "ratio": [0.0, 0.0],
+                "missing": ["", ""],
+                "path": ["a", "b"],
+            }
+        )
+
+        zarr_group = MagicMock()
+        zarr_group.attrs = {}
+
+        builder._attach_catalog_metadata(zarr_group, group_df, group_attrs={})
+
+        assert zarr_group.attrs["level"] == 0
+        assert zarr_group.attrs["flag"] is False
+        assert zarr_group.attrs["ratio"] == 0.0
+        # Empty strings stay an 'absent' marker, collapsing to None.
+        assert zarr_group.attrs["missing"] is None
+
     def test_iter_esm_groups(self, local_om2_datastore_path, intake_esm_kwargs, tmpdir):
         """The shared ESM iterator should yield one structured entry per catalog key."""
         dummy_store_path = tmpdir / "dummy_store.icechunk"
@@ -763,7 +798,7 @@ class TestVirtualIcechunkStoreBuilder(BuilderTests):
 
     @pytest.mark.parametrize(
         "xr_kwargs",
-        [None, {"decode_cf": True}, [{"decode_cf": True}, {"decode_times": True}]],
+        [None, {"decode_cf": True}, "per-group-list"],
     )
     def test_init_xarray_kwargs(
         self,
@@ -782,14 +817,17 @@ class TestVirtualIcechunkStoreBuilder(BuilderTests):
             esm_datastore_path=local_om2_datastore_path,
             icechunk_store_path=dummy_store_path,
             esm_datastore_kwargs=intake_esm_kwargs,
-            xarray_kwargs=xr_kwargs,
         )
         if xr_kwargs is None:
             assert builder.xarray_kwargs == [{} for _ in builder.esm_ds]
         elif isinstance(xr_kwargs, dict):
+            builder._xarray_kwargs = xr_kwargs
             assert builder.xarray_kwargs == [xr_kwargs for _ in builder.esm_ds]
-        elif isinstance(xr_kwargs, list):
-            assert builder.xarray_kwargs == xr_kwargs
+        else:
+            # A correctly-sized per-group list is returned unchanged.
+            per_group = [{"decode_cf": True} for _ in builder.esm_ds]
+            builder._xarray_kwargs = per_group
+            assert builder.xarray_kwargs == per_group
 
     @patch("intake_virtual_icechunk.source._build.open_virtual_mfdataset")
     def test_build_nested(
@@ -896,6 +934,53 @@ class TestZarrIcechunkStoreBuilder:
         assert builder.xarray_kwargs == [
             {"decode_times": False} for _ in range(n_datasets)
         ]
+
+    def test_xarray_kwargs_list_correct_length(
+        self, local_om2_datastore_path, intake_esm_kwargs, tmpdir
+    ):
+        """A list with one dict per group is returned unchanged."""
+        dummy_store_path = tmpdir / "dummy_store.icechunk"
+        builder = IcechunkStoreBuilder(
+            esm_datastore_path=local_om2_datastore_path,
+            icechunk_store_path=dummy_store_path,
+            esm_datastore_kwargs=intake_esm_kwargs,
+        )
+        per_group = [{"decode_times": True} for _ in builder.esm_ds]
+        builder._xarray_kwargs = per_group
+
+        assert builder.xarray_kwargs == per_group
+
+    def test_xarray_kwargs_list_too_short_raises(
+        self, local_om2_datastore_path, intake_esm_kwargs, tmpdir
+    ):
+        """A list shorter than the group count must raise, not silently drop groups."""
+        dummy_store_path = tmpdir / "dummy_store.icechunk"
+        builder = IcechunkStoreBuilder(
+            esm_datastore_path=local_om2_datastore_path,
+            icechunk_store_path=dummy_store_path,
+            esm_datastore_kwargs=intake_esm_kwargs,
+            xarray_kwargs=[{"decode_times": False}],
+        )
+        assert len(builder.esm_ds) > 1  # guard would be vacuous otherwise
+
+        with pytest.raises(ValueError, match="dataset group"):
+            _ = builder.xarray_kwargs
+
+    def test_xarray_kwargs_list_too_long_raises(
+        self, local_om2_datastore_path, intake_esm_kwargs, tmpdir
+    ):
+        """A list longer than the group count must raise rather than ignore extras."""
+        dummy_store_path = tmpdir / "dummy_store.icechunk"
+        builder = IcechunkStoreBuilder(
+            esm_datastore_path=local_om2_datastore_path,
+            icechunk_store_path=dummy_store_path,
+            esm_datastore_kwargs=intake_esm_kwargs,
+        )
+        too_long = [{} for _ in builder.esm_ds] + [{}]
+        builder._xarray_kwargs = too_long
+
+        with pytest.raises(ValueError, match="dataset group"):
+            _ = builder.xarray_kwargs
 
     def test_repr_defaults(self, local_om2_datastore_path, intake_esm_kwargs, tmpdir):
         """__repr__ should show all fields and start with the class name."""
