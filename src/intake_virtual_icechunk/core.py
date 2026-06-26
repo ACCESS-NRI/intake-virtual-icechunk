@@ -3,19 +3,26 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import sys
 from collections.abc import Callable
 from functools import cached_property
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import obstore
 import pandas as pd
 import polars as pl
 import zarr
+import zarr.api.asynchronous
 from intake.catalog import Catalog
 from obstore.store import from_url as _obs_from_url
+from zarr.core.sync import sync as _zarr_sync
+
+if TYPE_CHECKING:
+    from zarr.core.group import AsyncGroup
 
 from intake_virtual_icechunk._search import pl_search
 from intake_virtual_icechunk._source import IcechunkDataSource
@@ -79,6 +86,89 @@ def _match_query(attrs: dict, query: dict) -> bool:
         if attr_val not in allowed:
             return False
     return True
+
+
+async def _extract_group_metadata(
+    group: AsyncGroup,
+) -> tuple[tuple[str, ...] | None, tuple[str, ...], tuple[str, ...]]:
+    """Read ``(variable, coordinates, dimensions)`` directly from zarr metadata.
+
+    This reproduces what ``xarray.open_zarr(...).{data_vars,coords,dims}`` returns
+    for a group written by this package, without the cost of building a full
+    :class:`xarray.Dataset` (CF decoding, index construction, dask wrapping).
+
+    The split between coordinates and data variables follows xarray's own
+    convention — the inverse of how the store was written:
+
+    * a name is a *coordinate* if it appears in any ``coordinates`` attribute
+      (array- or group-level), or it is a 1-D array whose single dimension equals
+      its own name (a dimension coordinate);
+    * everything else is a *data variable*.
+
+    ``dimensions`` is the union of every array's ``dimension_names``. Ordering is
+    first-seen across the group's members so the result is deterministic.
+
+    Returns
+    -------
+    tuple of (variable, coordinates, dimensions)
+        Awaiting this coroutine yields a 3-tuple of:
+
+        * ``variable`` : tuple of str, or None — the data-variable names (``None``
+          when the group has no data variables, e.g. a grid file).
+        * ``coordinates`` : tuple of str — the coordinate-variable names.
+        * ``dimensions`` : tuple of str — the dimension names.
+    """
+    dimensions: dict[str, None] = {}  # ordered set
+    coord_attr_names: set[str] = set()
+    array_dims: dict[str, tuple[str, ...]] = {}
+
+    # Group-level coordinates attribute (uncommon, but honour it for robustness).
+    group_coords = group.metadata.attributes.get("coordinates")
+    if group_coords:
+        coord_attr_names.update(group_coords.split())
+
+    async for name, node in group.members():
+        dims = tuple(node.metadata.dimension_names or ())
+        array_dims[name] = dims
+        for d in dims:
+            dimensions.setdefault(d, None)
+        child_coords = node.metadata.attributes.get("coordinates")
+        if child_coords:
+            coord_attr_names.update(child_coords.split())
+
+    coordinates = tuple(
+        name
+        for name, dims in array_dims.items()
+        if name in coord_attr_names or (len(dims) == 1 and dims[0] == name)
+    )
+    coord_set = set(coordinates)
+    variables = tuple(name for name in array_dims if name not in coord_set)
+
+    # Grid files might have no data variables — return None rather than an empty
+    # tuple, which is more likely to cause confusion downstream.
+    return (variables or None, coordinates, tuple(dimensions))
+
+
+async def _extract_all_group_metadata(
+    store, keys: list[str]
+) -> dict[str, tuple[tuple[str, ...] | None, tuple[str, ...], tuple[str, ...]]]:
+    """Concurrently read ``(variable, coordinates, dimensions)`` for every key.
+
+    Returns
+    -------
+    dict of {str: (variable, coordinates, dimensions)}
+        Awaiting this coroutine yields a mapping from group key to that group's
+        metadata 3-tuple, as produced by :func:`_extract_group_metadata`.
+    """
+    async_root = await zarr.api.asynchronous.open_group(store=store, mode="r")
+
+    async def _one(
+        key: str,
+    ) -> tuple[str, tuple[tuple[str, ...] | None, tuple[str, ...], tuple[str, ...]]]:
+        group = await async_root.getitem(key)
+        return key, await _extract_group_metadata(group)
+
+    return dict(await asyncio.gather(*(_one(key) for key in keys)))
 
 
 class IcechunkCatalog(Catalog):
@@ -502,24 +592,25 @@ class IcechunkCatalog(Catalog):
         group's ``.zattrs`` as written by
         :class:`~intake_virtual_icechunk._build.IcechunkStoreBuilder`.
         """
-        records = []
+        # Read variable/coordinate/dimension names straight from the zarr
+        # metadata, concurrently across all groups. This avoids building a full
+        # xarray Dataset per group (CF decoding, index construction, dask
+        # wrapping) just to read a handful of names. ``_zarr_sync`` runs the
+        # coroutine on zarr's own background event loop, so it is safe to call
+        # from inside a running event loop (e.g. a Jupyter kernel).
+        group_metadata = _zarr_sync(
+            _extract_all_group_metadata(self._zarr_store, self.keys())
+        )
 
+        records = []
         for key in self.keys():
-            _df = IcechunkDataSource(
-                key=key,
-                store=self._zarr_store,
-                group=key,
-                storage_options=self.storage_options,
-                xarray_kwargs=self.xarray_kwargs,
-            ).to_xarray()
+            variable, coordinates, dimensions = group_metadata[key]
             row: dict = {"key": key}
-            row.update(
-                {"variable": tuple(_df.data_vars) or None}
-            )  # grid files might be none - better that than an empty list which is more likely to cause confusion
-            row.update(
-                {"coordinates": tuple(_df.coords)}
-            )  # Has to coordinates, not coordinate: zarr stores coords internally as a space seprated list in a single attribute called coordinates.
-            row.update({"dimensions": tuple(_df.dims)})
+            row["variable"] = variable
+            # "coordinates" not "coordinate": zarr stores coords internally as a
+            # space-separated list in a single attribute called "coordinates".
+            row["coordinates"] = coordinates
+            row["dimensions"] = dimensions
 
             keys = [k.lower() for k in row.keys()]
             attrs = {

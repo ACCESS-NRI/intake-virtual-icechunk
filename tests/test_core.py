@@ -558,6 +558,21 @@ class TestIcechunkCatalogDf:
         assert len(df) > 0
         assert all(df["filename"] == filename_val)
 
+    def test_df_metadata_matches_xarray(self, icechunk_localstore_path):
+        """The direct zarr-metadata reader must reproduce what xr.open_zarr gives.
+
+        Asserts parity (order-insensitively) against the xarray-derived ground
+        truth on real built data, covering the coordinate/data-var/dimension split.
+        """
+        cat = IcechunkCatalog(store=icechunk_localstore_path)
+        df = cat.df
+        assert set(df.columns) >= {"variable", "coordinates", "dimensions"}
+        for key in cat.keys():
+            ds = xr.open_zarr(cat._zarr_store, group=key)
+            assert set(df.loc[key, "variable"] or ()) == set(ds.data_vars)
+            assert set(df.loc[key, "coordinates"]) == set(ds.coords)
+            assert set(df.loc[key, "dimensions"]) == set(ds.dims)
+
 
 class TestIcechunkCatalogToDatasetDict:
     def test_returns_dict_of_datasets(self, icechunk_localstore_path):
