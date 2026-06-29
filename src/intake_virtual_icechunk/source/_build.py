@@ -865,6 +865,7 @@ class IcechunkStoreBuilder(AbstractIcechunkStoreBuilder):
         )
         model.save(sidecar_fname, store=sidecar_store)
 
+
 def _filter_kwargs(kwargs: dict) -> dict:
     """Filter out mfdataset specific kwargs that would cause the single-dataset open to fail"""
     return {
