@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import pandas as pd
+import xarray as xr
 
 if TYPE_CHECKING:
     from virtualizarr.parsers import (
@@ -131,3 +132,44 @@ class GroupEntry:
                 f"Group entry '{self.public_key}' does not include source file paths."
             )
         return self.source_file_paths
+
+
+def filter_kwargs(kwargs: dict) -> dict:
+    """Filter out mfdataset specific kwargs that would cause the single-dataset open to fail"""
+    return {
+        k: v
+        for k, v in kwargs.items()
+        if k
+        not in [
+            "parallel",
+            "coords",
+            "compat",
+            "combine_attrs",
+            "join",
+            "concat_dim",
+        ]
+    }
+
+
+def infer_loadable_vars(entry: GroupEntry) -> list[str]:
+    """Infer variables to load based on the group dataframe.
+
+    Virtualizarr typically falls over if 1D variables are not opened, as xarray
+    will generate an error message something like:
+    ```python
+    Every dimension requires a corresponding 1D coordinate and index for inferring
+    concatenation order but the coordinate 'model_theta_level_number' has no
+    corresponding index
+    ````
+
+    To get around this, we'll load the first file in the dataset, and grab any
+    one dimensional coordinates. This should hopefully be enough...
+    """
+
+    dummy_file = entry.file_paths[0]
+
+    # Don't pass any kwargs for now... might have to change that though.
+    with xr.open_dataset(dummy_file) as ds:
+        loadable_vars = [d for d in ds.coords if ds[d].ndim == 1]
+
+    return loadable_vars  # type: ignore[return-value]

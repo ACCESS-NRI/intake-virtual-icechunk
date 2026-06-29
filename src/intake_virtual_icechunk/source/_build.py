@@ -31,6 +31,8 @@ from intake_virtual_icechunk.source.utils import (
     DataStoreStructure,
     GroupEntry,
     ParserInferenceError,
+    filter_kwargs,
+    infer_loadable_vars,
 )
 from intake_virtual_icechunk.utils import (
     _filter_config_args,
@@ -521,6 +523,7 @@ class VirtualIcechunkStoreBuilder(AbstractIcechunkStoreBuilder):
 
         # Are these defaults too opinionated?  Maybe we should have a narrower set
         # of defaults or have a total override if the user provides any xarray kwargs?
+
         default_kwargs = dict(
             parser=self.parser,
             registry=self.obstore_registry,
@@ -528,6 +531,9 @@ class VirtualIcechunkStoreBuilder(AbstractIcechunkStoreBuilder):
             decode_times=False,
             coords="minimal",
             compat="override",
+            join="override",
+            combine="nested",
+            loadable_variables=infer_loadable_vars(entry),
         )
 
         open_kwargs = {**default_kwargs, **entry.xarray_kwargs}
@@ -538,7 +544,7 @@ class VirtualIcechunkStoreBuilder(AbstractIcechunkStoreBuilder):
             if not self._is_concat_dim_order_error(exc):
                 raise exc
 
-            open_kwargs = _filter_kwargs(open_kwargs)
+            open_kwargs = filter_kwargs(open_kwargs)
 
             with open_virtual_dataset(url=entry.file_paths[0], **open_kwargs) as vds:
                 vds.vz.to_icechunk(store, group=entry.public_key)
@@ -789,7 +795,7 @@ class IcechunkStoreBuilder(AbstractIcechunkStoreBuilder):
             if not self._is_concat_dim_order_error(exc):
                 raise exc
 
-            kwargs = _filter_kwargs(entry.xarray_kwargs)
+            kwargs = filter_kwargs(entry.xarray_kwargs)
             with xr.open_dataset(
                 entry.file_paths[0],
                 **kwargs,
