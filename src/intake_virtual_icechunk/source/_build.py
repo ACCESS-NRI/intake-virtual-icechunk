@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import abc
+import warnings
 from collections.abc import Generator, Iterable, Mapping
+from dataclasses import dataclass
 from functools import cached_property
 
 # Copyright 2026 ACCESS-NRI and contributors. See the top-level COPYRIGHT file for details.
@@ -9,12 +11,15 @@ from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import dask
 import icechunk
 import intake
 import pandas as pd
 import polars as pl
 import xarray as xr
 import zarr
+from dask.array.core import normalize_chunks
+from dask.utils import parse_bytes
 from icechunk.xarray import to_icechunk
 from intake_esm.core import esm_datastore
 from intake_esm.utils import MinimalExploder
@@ -33,6 +38,7 @@ from intake_virtual_icechunk.utils import (
     _filter_config_args,
     _intake_cat_filename,
     _path_to_url,
+    _representative_source_size,
     _resolve_storage,
     _resolve_store,
     _resolve_vcc_store,
@@ -145,6 +151,15 @@ class AbstractIcechunkStoreBuilder(abc.ABC):
         """
         if isinstance(self._xarray_kwargs, dict):
             return [self._xarray_kwargs for _ in self.esm_ds]
+        n_groups = len(self.esm_ds)
+        if len(self._xarray_kwargs) != n_groups:
+            raise ValueError(
+                f"xarray_kwargs was given as a list of {len(self._xarray_kwargs)} "
+                f"dict(s), but the datastore has {n_groups} dataset group(s). When "
+                "passing a list, it must have exactly one dict per group (otherwise "
+                "groups would be silently dropped); pass a single dict to apply the "
+                "same kwargs to every group."
+            )
         return self._xarray_kwargs
 
     def _extract_datastore_structure(self) -> DataStoreStructure:
@@ -292,9 +307,11 @@ class AbstractIcechunkStoreBuilder(abc.ABC):
             .to_dict(as_series=False)
         )
 
-        # No None type until we deiter columns
+        # Drop nulls and empty-string "absent" markers (no None type until we
+        # deiter columns) while keeping legitimate falsy values such as 0, 0.0
+        # and False.
         exploded_metadata = {
-            k: [val for val in set(v) if val]  # type: ignore[arg-type]
+            k: [val for val in set(v) if val is not None and val != ""]  # type: ignore[arg-type]
             for k, v in exploded_metadata.items()
         }
 
@@ -691,6 +708,8 @@ class IcechunkStoreBuilder(AbstractIcechunkStoreBuilder):
             cols_to_deiter=cols_to_deiter,
             xarray_kwargs=xarray_kwargs,
         )
+        # Rechunk/shard config; None means "write source chunking unchanged".
+        self._rechunk: _RechunkSpec | None = None
 
     def __repr__(self) -> str:
         """Return a multiline representation showing the builder configuration."""
@@ -710,11 +729,67 @@ class IcechunkStoreBuilder(AbstractIcechunkStoreBuilder):
 
         return "write"
 
+    def _source_file_paths(self) -> list[str]:
+        """All source asset paths across the datastore (used to size auto shards)."""
+        esmcat = self.esm_ds.esmcat
+        return esmcat.df[esmcat.assets.column_name].tolist()
+
+    def rechunk(
+        self,
+        chunks: str | int | dict[str, int] | None = None,
+        shards: str | int | dict[str, int] | None = None,
+    ) -> IcechunkStoreBuilder:
+        """Configure re-chunking (and optional zarr v3 sharding) applied at build.
+
+        Call before :meth:`build`. If never called, source chunking is written
+        unchanged. Returns ``self`` so calls can be chained.
+
+        Parameters
+        ----------
+        chunks :
+            On-disk zarr chunk shape. One of:
+
+            * ``None`` — inherit the source file chunking (default).
+            * ``"auto"`` — let dask pick a shape using its configured
+              ``array.chunk-size``.
+            * a byte size — ``"128MiB"`` / ``"128"`` (128 bytes) / an ``int`` of
+              bytes (parsed by :func:`dask.utils.parse_bytes`); dask picks a shape
+              hitting roughly that size.
+            * a mapping ``{dim: length}`` — explicit per-dimension chunk lengths;
+              dimensions not listed keep their source chunking.
+        shards :
+            On-disk zarr v3 shard shape (a shard bundles many chunks into one
+            storage object). One of:
+
+            * ``None`` — no sharding (default).
+            * ``"auto"`` — target the median on-disk size of the first ~10 source
+              files (≈ one shard object per input file). Resolved now, here.
+            * a byte size — as for *chunks*.
+            * a mapping ``{dim: length}`` — explicit per-dimension shard lengths.
+
+            A shard must be an integer multiple of the chunk on every dimension; a
+            shard smaller than the chunk disables sharding for that variable (with a
+            warning).
+        """
+        norm_chunks = _normalize_size_arg(chunks, "chunks", allow_auto=True)
+        if isinstance(shards, str) and shards == "auto":
+            shards = _representative_source_size(self._source_file_paths())
+        norm_shards = _normalize_size_arg(shards, "shards", allow_auto=False)
+        self._rechunk = _RechunkSpec(chunks=norm_chunks, shards=norm_shards)  # type: ignore[arg-type]
+        return self
+
+    def _apply_rechunking(self, ds: xr.Dataset) -> xr.Dataset:
+        """Apply the configured rechunk/shard spec to *ds* (no-op if unset)."""
+        if self._rechunk is None:
+            return ds
+        return _rechunk_dataset(ds, self._rechunk)
+
     def _write_entry(self, store: icechunk.IcechunkStore, entry: GroupEntry) -> None:
         """Write one real-data group into an open Icechunk transaction."""
 
         try:
             with xr.open_mfdataset(entry.file_paths, **entry.xarray_kwargs) as ds:
+                ds = self._apply_rechunking(ds)
                 to_icechunk(ds, store.session, group=entry.public_key, mode="a")
         except Exception as exc:
             if not self._is_concat_dim_order_error(exc):
@@ -725,6 +800,7 @@ class IcechunkStoreBuilder(AbstractIcechunkStoreBuilder):
                 entry.file_paths[0],
                 **kwargs,
             ) as ds:
+                ds = self._apply_rechunking(ds)
                 to_icechunk(
                     ds,
                     store.session,
@@ -788,3 +864,179 @@ class IcechunkStoreBuilder(AbstractIcechunkStoreBuilder):
             config=_filter_config_args(self.storage_options),
         )
         model.save(sidecar_fname, store=sidecar_store)
+
+def _filter_kwargs(kwargs: dict) -> dict:
+    """Filter out mfdataset specific kwargs that would cause the single-dataset open to fail"""
+    return {
+        k: v
+        for k, v in kwargs.items()
+        if k
+        not in [
+            "parallel",
+            "coords",
+            "compat",
+            "combine_attrs",
+            "join",
+            "concat_dim",
+        ]
+    }
+
+
+@dataclass
+class _RechunkSpec:
+    """Normalized rechunk/shard configuration set by ``IcechunkStoreBuilder.rechunk``.
+
+    ``chunks`` is ``None`` (native) | ``"auto"`` | an ``int`` of bytes | a
+    ``{dim: length}`` mapping. ``shards`` is ``None`` (off) | an ``int`` of bytes |
+    a ``{dim: length}`` mapping (``"auto"`` is resolved to bytes when ``rechunk``
+    is called).
+    """
+
+    chunks: str | int | dict[str, int] | None
+    shards: int | dict[str, int] | None
+
+
+def _validate_shape_dict(value: dict, name: str) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for dim, length in value.items():
+        if not isinstance(length, int) or length <= 0:
+            raise ValueError(
+                f"{name} mapping values must be positive integers; "
+                f"got {dim!r}: {length!r}."
+            )
+        out[str(dim)] = int(length)
+    return out
+
+
+def _normalize_size_arg(
+    value: str | int | dict | None, name: str, *, allow_auto: bool
+) -> str | int | dict[str, int] | None:
+    """Normalize a ``chunks``/``shards`` argument to None | "auto" | int | dict."""
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return _validate_shape_dict(value, name)
+    if isinstance(value, int):
+        if value <= 0:
+            raise ValueError(f"{name} byte size must be positive; got {value!r}.")
+        return value
+    if isinstance(value, str):
+        if value == "auto":
+            if not allow_auto:
+                raise ValueError(f"{name}='auto' should already be resolved.")
+            return "auto"
+        return int(parse_bytes(value))  # raises ValueError on an unparseable string
+    raise TypeError(
+        f"{name} must be None, 'auto', a byte size (str/int), or a "
+        f"{{dim: length}} mapping; got {type(value).__name__}."
+    )
+
+
+def _inner_chunk_shape(var: xr.DataArray) -> dict[str, int]:
+    """Per-dimension on-disk chunk length for *var* (first dask block, or full).
+
+    ``var.chunksizes[dim]`` is a tuple of the dask block lengths along *dim*
+    (e.g. ``(12, 12, 6)`` for a size-30 dim chunked at 12). We take ``[0]`` —
+    the first block — as the representative uniform chunk length, which is what
+    zarr writes for every chunk but the (possibly short) last one. If *var* is
+    not dask-backed (``var.chunks is None``) the whole dimension is one chunk.
+    """
+    if var.chunks is None:
+        return {dim: int(var.sizes[dim]) for dim in var.dims}
+    return {dim: int(var.chunksizes[dim][0]) for dim in var.dims}
+
+
+def _ceil_to_multiple(value: int, multiple: int) -> int:
+    """Round *value* up to the nearest integer multiple of *multiple*."""
+    return ((value + multiple - 1) // multiple) * multiple
+
+
+def _resolve_shard_shape(
+    name: str,
+    var: xr.DataArray,
+    chunk_by_dim: dict[str, int],
+    shards: int | dict[str, int],
+) -> dict[str, int] | None:
+    """Resolve the shard shape for *var*, or None to skip sharding it (with warning).
+
+    Byte targets delegate the base shape to dask, then snap each dimension up to a
+    multiple of the chunk. Explicit dicts default unlisted dimensions to one chunk.
+    A shard smaller than the chunk on any dimension disables sharding for *var*.
+    """
+    if isinstance(shards, dict):
+        desired = {dim: shards.get(dim, chunk_by_dim[dim]) for dim in var.dims}
+    else:
+        # A byte target below one chunk can't make a valid (>= 1 chunk) shard;
+        # disable sharding for this variable rather than silently using 1x chunk.
+        chunk_bytes = var.dtype.itemsize
+        for length in chunk_by_dim.values():
+            chunk_bytes *= length
+        if int(shards) < chunk_bytes:
+            warnings.warn(
+                f"Requested shard size ({int(shards)} bytes) for variable "
+                f"{name!r} is smaller than one chunk ({chunk_bytes} bytes); "
+                f"writing {name!r} unsharded.",
+                stacklevel=3,
+            )
+            return None
+        ideal = normalize_chunks(
+            "auto", shape=var.shape, dtype=var.dtype, limit=int(shards)
+        )
+        # ``ideal`` is dask's block shape hitting the byte target, but a shard must
+        # tile the chunk grid, so snap each dimension to the nearest whole number
+        # of chunks (at least one). e.g. ideal=50, chunk=12 -> round(50/12)=4 -> 48.
+        desired = {
+            dim: max(1, round(ideal[i][0] / chunk_by_dim[dim])) * chunk_by_dim[dim]
+            for i, dim in enumerate(var.dims)
+        }
+
+    shard: dict[str, int] = {}
+    for dim in var.dims:
+        chunk_len = chunk_by_dim[dim]
+        target = desired[dim]
+        if target < chunk_len:
+            warnings.warn(
+                f"Requested shard for variable {name!r} is smaller than its chunk "
+                f"on dimension {dim!r} ({target} < {chunk_len}); writing "
+                f"{name!r} unsharded.",
+                stacklevel=3,
+            )
+            return None
+        # Shards must be an integer multiple of the chunk; cap at the padded extent.
+        target = _ceil_to_multiple(target, chunk_len)
+        shard[dim] = min(target, _ceil_to_multiple(int(var.sizes[dim]), chunk_len))
+    return shard
+
+
+def _rechunk_dataset(ds: xr.Dataset, spec: _RechunkSpec) -> xr.Dataset:
+    """Apply *spec* to *ds*: rechunk the dask graph and set zarr chunk/shard encoding."""
+    if spec.chunks is not None:
+        if isinstance(spec.chunks, dict):
+            ds = ds.chunk(spec.chunks)
+        elif spec.chunks == "auto":
+            ds = ds.chunk("auto")
+        else:  # int bytes -> let dask pick the shape for that target size
+            with dask.config.set({"array.chunk-size": int(spec.chunks)}):
+                ds = ds.chunk("auto")
+
+    if spec.shards is not None:
+        for name in list(ds.data_vars):
+            var = ds[name]
+            if not var.dims:
+                continue  # scalar; nothing to shard
+            chunk_by_dim = _inner_chunk_shape(var)
+            shard_by_dim = _resolve_shard_shape(name, var, chunk_by_dim, spec.shards)
+            if shard_by_dim is None:
+                continue
+            # Align dask blocks to whole shards so each task writes one shard, and
+            # pin both the inner chunk and the shard in the zarr encoding. Both are
+            # required (verified on icechunk 2.x): xarray treats the shard as the
+            # write unit, so its safe-chunks check demands each dask block equal one
+            # whole shard, and encoding["chunks"] pins the inner read chunk within
+            # it. Omitting either raises "encoding['chunks'] ... would overlap
+            # multiple Dask chunks".
+            ds[name] = var.chunk(shard_by_dim)
+            ds[name].encoding["chunks"] = tuple(chunk_by_dim[d] for d in var.dims)
+            ds[name].encoding["shards"] = tuple(shard_by_dim[d] for d in var.dims)
+
+    return ds

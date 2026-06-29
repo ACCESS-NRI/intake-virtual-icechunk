@@ -21,31 +21,20 @@ def sample_data() -> Path:
 
 @pytest.fixture(scope="session")
 def groups():
+    """Independent manifest of the dataset groups in the access-om2 fixture store.
+
+    These are the Zarr group keys produced by ``icechunk_localstore_path`` (built
+    from the committed access-om2 sample data via ``AccessOm2Builder``). Kept here
+    as a hand-maintained expectation so the catalog's key listing is checked
+    against something other than itself.
+    """
     return [
-        {
-            "key": "CMIP.BCC.BCC-ESM1.historical",
-            "attrs": {
-                "source_id": "BCC-ESM1",
-                "experiment_id": "historical",
-                "member_id": "r1i1p1f1",
-            },
-        },
-        {
-            "key": "CMIP.BCC.BCC-ESM1.ssp585",
-            "attrs": {
-                "source_id": "BCC-ESM1",
-                "experiment_id": "ssp585",
-                "member_id": "r1i1p1f1",
-            },
-        },
-        {
-            "key": "CMIP.MRI.MRI-ESM2-0.historical",
-            "attrs": {
-                "source_id": "MRI-ESM2-0",
-                "experiment_id": "historical",
-                "member_id": "r1i1p1f1",
-            },
-        },
+        {"key": "ocean.1mon.nv:2.scalar_axis:1.mean"},
+        {"key": "ocean.1mon.nv:2.xt_ocean:1.yt_ocean:1.mean"},
+        {"key": "ocean.1mon.xt_ocean:1.yt_ocean:1.mean"},
+        {"key": "ocean.1yr.nv:2.st_ocean:1.xt_ocean:1.yt_ocean:1.mean"},
+        {"key": "ocean.fx.xt_ocean:1.yt_ocean:1.point"},
+        {"key": "seaIce.1mon.d2:2.ni:1.nj:1.mean"},
     ]
 
 
