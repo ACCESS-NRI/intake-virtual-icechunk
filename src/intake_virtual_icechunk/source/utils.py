@@ -87,9 +87,10 @@ class GroupEntry:
         group_df: pd.DataFrame,
         groupby_attrs: list[str],
         assets_col: str,
-        xarray_kwargs: dict = {},
+        xarray_kwargs: dict | None = None,
     ) -> GroupEntry:
         """Construct a builder entry from one grouped intake-esm dataframe slice."""
+        xarray_kwargs = xarray_kwargs or {}
 
         group_attrs = {
             attr: group_df[attr].iloc[0]
